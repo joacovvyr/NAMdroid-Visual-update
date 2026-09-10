@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <array>
+#include <chrono>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -44,6 +45,8 @@ public:
     }
     // 0 = Auto (Exclusive con fallback a Shared), 1 = Exclusive, 2 = Shared.
     void setSharingMode(int32_t mode) { mSharingMode.store(mode < 0 ? 0 : (mode > 2 ? 2 : mode)); }
+    // 0 = mezcla/mono automatico, 1 = canal 1, 2 = canal 2.
+    void setInputChannelMode(int32_t mode) { mInputChannelMode.store(mode < 0 ? 0 : (mode > 2 ? 2 : mode)); }
     void looperCommand(int command);
     float getInputLevelDb() const { return mInputLevelDb.load(); }
     float getOutputLevelDb() const { return mOutputLevelDb.load(); }
@@ -54,6 +57,11 @@ public:
     double getLastModelSampleRate() const { return mLastModelSampleRate.load(); }
     int32_t getStreamSampleRate() const { return mSampleRate.load(); }
     double getLastCallbackLoadPercent() const { return mLastLoadPercent.load(); }
+    int32_t getInputChannelCount() const { return mInChannelCount.load(); }
+    int32_t getOutputChannelCount() const { return mOutChannelCount.load(); }
+    int32_t getActualSharingMode() const { return mActualSharingMode.load(); }
+    int32_t getBufferSizeFrames() const { return mBufferSizeFrames.load(); }
+    int32_t getXRunCount() const { return mXRunCount.load(); }
 
     // oboe::AudioStreamDataCallback
     oboe::DataCallbackResult onAudioReady(oboe::AudioStream *outputStream, void *audioData,
@@ -109,6 +117,14 @@ private:
     std::atomic<int32_t> mInputDeviceId{0};
     std::atomic<int32_t> mOutputDeviceId{0};
     std::atomic<int32_t> mSharingMode{0};
+    std::atomic<int32_t> mActualSharingMode{0};
+    std::atomic<int32_t> mInputChannelMode{0};
+    std::atomic<int32_t> mBufferSizeFrames{0};
+    std::atomic<int32_t> mXRunCount{0};
+
+    // Objetivos atomicos + valores suavizados usados solamente por audio.
+    float mSmoothedInputGain{1.0f};
+    float mSmoothedOutputGain{1.0f};
 
     // Buffers de trabajo reutilizados en el hilo de audio (nada de allocs ahi)
     std::vector<float> mInputBuffer;       // mono, tras downmix si hace falta
