@@ -381,6 +381,16 @@ bool AudioEngine::start() {
         kMaxBufferFrames * std::max({mInChannelCount.load(), mOutChannelCount.load(), 2}), 0.0f);
     mDelayBuffer.assign(std::max(mSampleRate.load() * 2, 1), 0.0f);
     mReverbBuffer.assign(std::max(mSampleRate.load() / 2, 1), 0.0f);
+    const std::array<float, 4> combTimes{0.0297f, 0.0371f, 0.0411f, 0.0437f};
+    const std::array<float, 2> allpassTimes{0.0050f, 0.0017f};
+    for (size_t i = 0; i < mReverbCombs.size(); ++i) {
+        mReverbCombs[i].assign(std::max<int>(mSampleRate.load() * combTimes[i], 1), 0.0f);
+        mReverbCombIndices[i] = 0;
+    }
+    for (size_t i = 0; i < mReverbAllpasses.size(); ++i) {
+        mReverbAllpasses[i].assign(std::max<int>(mSampleRate.load() * allpassTimes[i], 1), 0.0f);
+        mReverbAllpassIndices[i] = 0;
+    }
     mChorusBuffer.assign(std::max(mSampleRate.load() / 10, 1), 0.0f);
     mLooperBuffer.assign(std::max(mSampleRate.load() * 60, 1), 0.0f);
     mDelayWriteIndex = 0;
@@ -390,6 +400,10 @@ bool AudioEngine::start() {
     mLooperLength = 0;
     mTunerWriteIndex = 0;
     mChorusPhase = 0.0f;
+    mDrivePreviousInput = 0.0f;
+    mDriveAntiAliasState = 0.0f;
+    mDelaySmoothedSamples = mSampleRate.load() * 0.36f;
+    mDelayToneState = 0.0f;
     mEqLowState = 0.0f;
     mSmoothedInputGain = mInputGainLinear.load();
     mSmoothedOutputGain = mOutputGainLinear.load();
@@ -563,8 +577,20 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *,
             const float level = dbToLinear(mEffectParams[2][2].load());
             const float norm = std::max(std::tanh(drive), 1e-4f);
             for (int32_t i = 0; i < frames; ++i) {
-                const float clipped = std::tanh(mMonoResult[i] * drive) / norm;
-                mMonoResult[i] = (clipped * (0.65f + tone * 0.35f) + mMonoResult[i] * (0.35f - tone * 0.25f)) * level;
+                const float input = mMonoResult[i];
+                float accumulated = 0.0f;
+                // 4x oversampling por interpolacion reduce aliasing de la
+                // saturacion sin reservar buffers adicionales.
+                for (int phase = 1; phase <= 4; ++phase) {
+                    const float oversampled = mDrivePreviousInput +
+                        (input - mDrivePreviousInput) * (phase * 0.25f);
+                    const float shaped = std::tanh(oversampled * drive) / norm;
+                    mDriveAntiAliasState += 0.45f * (shaped - mDriveAntiAliasState);
+                    accumulated += mDriveAntiAliasState;
+                }
+                mDrivePreviousInput = input;
+                const float clipped = accumulated * 0.25f;
+                mMonoResult[i] = (clipped * (0.65f + tone * 0.35f) + input * (0.35f - tone * 0.25f)) * level;
             }
         } else if (effect == 3 && !bypass) {
             std::unique_lock<std::mutex> lock(mModelMutex, std::try_to_lock);
@@ -589,28 +615,48 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *,
             }
         } else if (effect == 5 && !mDelayBuffer.empty()) {
             const float timeMs = std::clamp(mEffectParams[5][0].load(), 40.0f, 1500.0f);
-            const size_t delaySamples = std::min<size_t>(static_cast<size_t>(mSampleRate.load() * timeMs / 1000.0f), mDelayBuffer.size() - 1);
+            const float targetDelaySamples = std::min<float>(mSampleRate.load() * timeMs / 1000.0f, mDelayBuffer.size() - 2);
             const float feedback = std::clamp(mEffectParams[5][1].load() / 100.0f, 0.0f, 0.92f);
             const float mix = std::clamp(mEffectParams[5][2].load() / 100.0f, 0.0f, 1.0f);
             for (int32_t i = 0; i < frames; ++i) {
-                const size_t read = (mDelayWriteIndex + mDelayBuffer.size() - delaySamples) % mDelayBuffer.size();
-                const float wet = mDelayBuffer[read];
+                mDelaySmoothedSamples += (targetDelaySamples - mDelaySmoothedSamples) * 0.0008f;
+                const size_t wholeDelay = static_cast<size_t>(mDelaySmoothedSamples);
+                const float fraction = mDelaySmoothedSamples - wholeDelay;
+                const size_t readA = (mDelayWriteIndex + mDelayBuffer.size() - wholeDelay) % mDelayBuffer.size();
+                const size_t readB = (readA + mDelayBuffer.size() - 1) % mDelayBuffer.size();
+                const float wet = mDelayBuffer[readA] * (1.0f - fraction) + mDelayBuffer[readB] * fraction;
                 const float dry = mMonoResult[i];
-                mDelayBuffer[mDelayWriteIndex] = dry + wet * feedback;
-                mMonoResult[i] = dry * (1.0f - mix) + wet * mix;
+                mDelayToneState += 0.18f * (wet - mDelayToneState);
+                mDelayBuffer[mDelayWriteIndex] = dry + mDelayToneState * feedback;
+                mMonoResult[i] = dry * (1.0f - mix) + mDelayToneState * mix;
                 mDelayWriteIndex = (mDelayWriteIndex + 1) % mDelayBuffer.size();
             }
-        } else if (effect == 6 && !mReverbBuffer.empty()) {
+        } else if (effect == 6 && !mReverbCombs[0].empty()) {
             const float decay = std::clamp(mEffectParams[6][0].load(), 0.2f, 12.0f);
             const float feedback = std::clamp(0.35f + decay / 20.0f, 0.35f, 0.93f);
             const float tone = std::clamp(mEffectParams[6][1].load() / 100.0f, 0.0f, 1.0f);
             const float mix = std::clamp(mEffectParams[6][2].load() / 100.0f, 0.0f, 1.0f);
             for (int32_t i = 0; i < frames; ++i) {
-                const float wet = mReverbBuffer[mReverbWriteIndex];
                 const float dry = mMonoResult[i];
-                mReverbBuffer[mReverbWriteIndex] = dry + wet * feedback * (0.7f + tone * 0.25f);
+                float wet = 0.0f;
+                for (size_t comb = 0; comb < mReverbCombs.size(); ++comb) {
+                    auto &buffer = mReverbCombs[comb];
+                    const size_t index = mReverbCombIndices[comb];
+                    const float delayed = buffer[index];
+                    buffer[index] = dry + delayed * feedback * (0.72f + tone * 0.22f);
+                    wet += delayed * 0.25f;
+                    mReverbCombIndices[comb] = (index + 1) % buffer.size();
+                }
+                for (size_t stage = 0; stage < mReverbAllpasses.size(); ++stage) {
+                    auto &buffer = mReverbAllpasses[stage];
+                    const size_t index = mReverbAllpassIndices[stage];
+                    const float delayed = buffer[index];
+                    const float input = wet;
+                    wet = delayed - input * 0.5f;
+                    buffer[index] = input + delayed * 0.5f;
+                    mReverbAllpassIndices[stage] = (index + 1) % buffer.size();
+                }
                 mMonoResult[i] = dry * (1.0f - mix) + wet * mix;
-                mReverbWriteIndex = (mReverbWriteIndex + 1) % mReverbBuffer.size();
             }
         } else if (effect == 7) {
             std::unique_lock<std::mutex> lock(mIrMutex, std::try_to_lock);
