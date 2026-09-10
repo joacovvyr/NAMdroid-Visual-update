@@ -75,6 +75,11 @@ Java_com_namdroid_app_audio_NamEngine_nativeSetEffectParam(JNIEnv *, jobject, ji
     if (gEngine) gEngine->setEffectParam(effectId, param, value);
 }
 
+JNIEXPORT void JNICALL
+Java_com_namdroid_app_audio_NamEngine_nativeBeginTransition(JNIEnv *, jobject) {
+    if (gEngine) gEngine->beginTransition();
+}
+
 JNIEXPORT jstring JNICALL
 Java_com_namdroid_app_audio_NamEngine_nativeLoadIr(JNIEnv *env, jobject, jstring path) {
     if (!gEngine) gEngine = std::make_unique<AudioEngine>();
