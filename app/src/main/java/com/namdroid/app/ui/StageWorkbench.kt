@@ -193,17 +193,27 @@ fun StageWorkbench(
 
 @Composable private fun StageTile(block: PedalBlock, position: Int, selected: Boolean, live: Boolean, modifier: Modifier, click: () -> Unit) {
     val tint = block.type.color
-    Surface(onClick = click, modifier = modifier, shape = RoundedCornerShape(7.dp), color = StageSurface, border = androidx.compose.foundation.BorderStroke(if (selected) 2.dp else 1.dp, if (selected) tint else StageLine)) {
-        Column(Modifier.background(Brush.verticalGradient(listOf(tint.copy(alpha = if (block.enabled) .22f else .04f), StageSurface))).padding(7.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("%02d".format(position + 1), fontSize = 9.sp, color = Color.LightGray)
-                Spacer(Modifier.weight(1f))
-                Box(Modifier.size(6.dp).background(if (block.enabled) tint else StageLine, CircleShape))
-                Text(" →", color = tint, fontSize = 11.sp)
+    val endpoint = block.type == BlockType.INPUT || block.type == BlockType.OUTPUT
+    Surface(onClick = click, modifier = modifier, shape = RoundedCornerShape(9.dp), color = if (endpoint) StageSurface else Color.Transparent, border = androidx.compose.foundation.BorderStroke(if (selected) 2.dp else 1.dp, if (selected) tint else if (endpoint) StageLine else Color.Transparent)) {
+        if (endpoint) {
+            Column(Modifier.background(Brush.verticalGradient(listOf(tint.copy(alpha = .18f), StageSurface))).padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("%02d".format(position + 1), Modifier.fillMaxWidth(), fontSize = 9.sp, color = Color.LightGray)
+                GearFace(block, Modifier.weight(1f).fillMaxWidth(), large = false)
+                Text(block.type.label, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                Text(if (block.enabled) "ACTIVE" else "BYPASS", fontSize = 8.sp, color = if (block.enabled) tint else Color.Gray)
             }
-            GearFace(block, Modifier.weight(1f).fillMaxWidth(), large = false)
-            Text(block.type.label, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (block.enabled) Color.White else Color(0xFF8E9AA6))
-            Text(if (block.enabled) (block.assetName?.substringBeforeLast('.') ?: "ACTIVE") else "BYPASS", fontSize = 9.sp, color = if (block.enabled) tint else Color.Gray, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        } else {
+            Box(Modifier.fillMaxSize().padding(3.dp), contentAlignment = Alignment.Center) {
+                GearFace(block, Modifier.fillMaxSize(), large = false)
+                Surface(Modifier.align(Alignment.TopStart), shape = CircleShape, color = Color(0xCC11161A)) {
+                    Text("%02d".format(position + 1), Modifier.padding(horizontal = 6.dp, vertical = 2.dp), fontSize = 8.sp, color = Color.White)
+                }
+                if (!block.enabled) {
+                    Surface(Modifier.align(Alignment.BottomCenter), shape = RoundedCornerShape(4.dp), color = Color(0xDD11161A)) {
+                        Text("BYPASS", Modifier.padding(horizontal = 7.dp, vertical = 2.dp), fontSize = 8.sp, fontWeight = FontWeight.Bold, color = Color.LightGray)
+                    }
+                }
+            }
         }
     }
 }
@@ -253,17 +263,17 @@ fun StageWorkbench(
 @Composable private fun GearKnob(spec: ParameterSpec, value: Float, tint: Color, large: Boolean, change: ((Float) -> Unit)?) {
     val currentValue by rememberUpdatedState(value); val currentChange by rememberUpdatedState(change)
     val fraction = ((value - spec.range.start) / (spec.range.endInclusive - spec.range.start)).coerceIn(0f, 1f)
-    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(if (large) 70.dp else 34.dp)) {
-        Canvas(Modifier.size(if (large) 54.dp else 25.dp).then(if (change == null) Modifier else Modifier.pointerInput(spec.key) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(if (large) 44.dp else 34.dp)) {
+        Canvas(Modifier.size(if (large) 34.dp else 25.dp).then(if (change == null) Modifier else Modifier.pointerInput(spec.key) {
             detectVerticalDragGestures { event, amount -> event.consume(); currentChange?.invoke((currentValue - amount / 180.dp.toPx() * (spec.range.endInclusive - spec.range.start)).coerceIn(spec.range)) }
         })) {
             val r = size.minDimension * .38f; val angle = (135 + fraction * 270) * Math.PI / 180
-            drawArc(Color.Black.copy(alpha = .55f), 135f, 270f, false, style = Stroke(if (large) 4.dp.toPx() else 2.dp.toPx(), cap = StrokeCap.Round))
+            drawArc(Color.Black.copy(alpha = .55f), 135f, 270f, false, style = Stroke(if (large) 3.dp.toPx() else 2.dp.toPx(), cap = StrokeCap.Round))
             drawCircle(Brush.radialGradient(listOf(Color(0xFF5F6B74), Color(0xFF11161A))), r)
-            drawLine(tint, center + Offset(cos(angle).toFloat(), sin(angle).toFloat()) * (r * .48f), center + Offset(cos(angle).toFloat(), sin(angle).toFloat()) * (r * .84f), if (large) 3.dp.toPx() else 1.5.dp.toPx(), StrokeCap.Round)
+            drawLine(tint, center + Offset(cos(angle).toFloat(), sin(angle).toFloat()) * (r * .48f), center + Offset(cos(angle).toFloat(), sin(angle).toFloat()) * (r * .84f), if (large) 2.dp.toPx() else 1.5.dp.toPx(), StrokeCap.Round)
         }
-        Text(spec.label.uppercase(), color = Color.White, fontSize = if (large) 9.sp else 6.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-        if (large) Text("${"%.1f".format(value)} ${spec.unit}", color = tint, fontSize = 9.sp, maxLines = 1)
+        Text(spec.label.uppercase(), color = Color.White, fontSize = if (large) 7.sp else 6.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        if (large) Text("${"%.1f".format(value)} ${spec.unit}", color = tint, fontSize = 7.sp, maxLines = 1)
     }
 }
 
