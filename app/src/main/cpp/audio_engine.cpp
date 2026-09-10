@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <chrono>
 
 #include "NAM/get_dsp.h"
 
@@ -148,11 +149,12 @@ bool AudioEngine::start() {
         mOutChannelCount.store(mOutStream->getChannelCount());
 
         oboe::AudioStreamBuilder inBuilder;
+        const int32_t requestedInputChannels = mInputChannelMode.load() == 0 ? 1 : 2;
         inBuilder.setDirection(oboe::Direction::Input)
             ->setPerformanceMode(oboe::PerformanceMode::LowLatency)
             ->setSharingMode(sharingMode)
             ->setFormat(oboe::AudioFormat::Float)
-            ->setChannelCount(oboe::ChannelCount::Mono)
+            ->setChannelCount(requestedInputChannels)
             ->setSampleRate(mOutStream->getSampleRate())
             ->setInputPreset(oboe::InputPreset::Unprocessed);
         if (mInputDeviceId.load() > 0) inBuilder.setDeviceId(mInputDeviceId.load());
@@ -171,6 +173,10 @@ bool AudioEngine::start() {
         }
 
         mInChannelCount.store(mInStream->getChannelCount());
+        mActualSharingMode.store(sharingMode == oboe::SharingMode::Exclusive ? 1 : 2);
+        mBufferSizeFrames.store(mOutStream->getBufferSizeInFrames());
+        auto xruns = mOutStream->getXRunCount();
+        mXRunCount.store(xruns ? xruns.value() : 0);
         return true;
     };
 
@@ -227,6 +233,8 @@ bool AudioEngine::start() {
     mTunerWriteIndex = 0;
     mChorusPhase = 0.0f;
     mEqLowState = 0.0f;
+    mSmoothedInputGain = mInputGainLinear.load();
+    mSmoothedOutputGain = mOutputGainLinear.load();
 
     {
         std::lock_guard<std::mutex> lock(mModelMutex);
@@ -298,6 +306,7 @@ bool AudioEngine::loadModel(const std::string &namFilePath, std::string &outErro
 
 oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *,
                                                     void *audioData, int32_t numFrames) {
+    const auto callbackStarted = std::chrono::steady_clock::now();
     auto *output = static_cast<float *>(audioData);
 
     // Nunca alocar en el callback de audio: si por lo que sea nos piden mas
@@ -312,8 +321,8 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *,
     const int32_t inChannels = std::max(mInChannelCount.load(), 1);
     const int32_t outChannels = std::max(mOutChannelCount.load(), 1);
 
-    // --- Lectura de entrada, con downmix a mono si el dispositivo no nos dio
-    // mono (muy comun en interfaces USB, que suelen ser estereo fijo) ---
+    // Lectura de entrada. En interfaces multicanal el usuario puede conservar
+    // el downmix o elegir explicitamente CH1/CH2 para no sumar ruido del otro jack.
     int32_t framesRead = 0;
     if (mInStream) {
         if (inChannels <= 1) {
@@ -323,12 +332,16 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *,
             auto readResult = mInStream->read(mInterleavedScratch.data(), frames, 0);
             if (readResult) {
                 framesRead = readResult.value();
+                const int32_t channelMode = mInputChannelMode.load();
                 for (int32_t i = 0; i < framesRead; ++i) {
-                    float sum = 0.0f;
-                    for (int32_t ch = 0; ch < inChannels; ++ch) {
-                        sum += mInterleavedScratch[i * inChannels + ch];
+                    if (channelMode > 0) {
+                        const int32_t selected = std::min(channelMode - 1, inChannels - 1);
+                        mInputBuffer[i] = mInterleavedScratch[i * inChannels + selected];
+                    } else {
+                        float sum = 0.0f;
+                        for (int32_t ch = 0; ch < inChannels; ++ch) sum += mInterleavedScratch[i * inChannels + ch];
+                        mInputBuffer[i] = sum / static_cast<float>(inChannels);
                     }
-                    mInputBuffer[i] = sum / static_cast<float>(inChannels);
                 }
             }
         }
@@ -337,13 +350,15 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *,
     // silencio para no trabarnos.
     for (int32_t i = framesRead; i < frames; ++i) mInputBuffer[i] = 0.0f;
 
-    const float inGain = mInputGainLinear.load();
-    const float outGain = mOutputGainLinear.load();
+    const float inputTarget = mInputGainLinear.load();
+    const float outputTarget = mOutputGainLinear.load();
+    const float smoothing = 1.0f - std::exp(-1.0f / (0.010f * std::max(mSampleRate.load(), 1)));
     const bool bypass = mBypass.load();
 
     float inputSquares = 0.0f;
     for (int32_t i = 0; i < frames; ++i) {
-        mMonoResult[i] = mInputBuffer[i] * inGain;
+        mSmoothedInputGain += (inputTarget - mSmoothedInputGain) * smoothing;
+        mMonoResult[i] = mInputBuffer[i] * mSmoothedInputGain;
         inputSquares += mMonoResult[i] * mMonoResult[i];
         if (mTunerEnabled.load() && !mTunerBuffer.empty()) {
             mTunerBuffer[mTunerWriteIndex++] = mMonoResult[i];
@@ -463,7 +478,10 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *,
             for (int32_t i = 0; i < frames; ++i) { const float lfo = 0.5f + 0.5f * std::sin(mChorusPhase); const size_t delay = static_cast<size_t>((0.006f + lfo * 0.018f * depth) * mSampleRate.load()); const size_t read = (mChorusWriteIndex + mChorusBuffer.size() - std::min(delay, mChorusBuffer.size() - 1)) % mChorusBuffer.size(); const float dry = mMonoResult[i], wet = mChorusBuffer[read]; mChorusBuffer[mChorusWriteIndex] = dry; mMonoResult[i] = dry * (1.0f - mix) + wet * mix; mChorusWriteIndex = (mChorusWriteIndex + 1) % mChorusBuffer.size(); mChorusPhase += 6.2831853f * rate / mSampleRate.load(); if (mChorusPhase > 6.2831853f) mChorusPhase -= 6.2831853f; }
         }
     }
-    for (int32_t i = 0; i < frames; ++i) mMonoResult[i] *= outGain;
+    for (int32_t i = 0; i < frames; ++i) {
+        mSmoothedOutputGain += (outputTarget - mSmoothedOutputGain) * smoothing;
+        mMonoResult[i] *= mSmoothedOutputGain;
+    }
 
     const int looper = mLooperState.load();
     if (!mLooperBuffer.empty() && looper != 0) {
@@ -493,6 +511,13 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *,
         for (int32_t ch = 0; ch < outChannels; ++ch) output[i * outChannels + ch] = 0.0f;
     }
 
+    if (mOutStream) {
+        auto xruns = mOutStream->getXRunCount();
+        if (xruns) mXRunCount.store(xruns.value());
+    }
+    const auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - callbackStarted).count();
+    const double budget = static_cast<double>(std::max(frames, 1)) / std::max(mSampleRate.load(), 1);
+    mLastLoadPercent.store(std::clamp(elapsed / budget * 100.0, 0.0, 999.0));
     return oboe::DataCallbackResult::Continue;
 }
 
