@@ -3,6 +3,7 @@
 #include <atomic>
 #include <array>
 #include <chrono>
+#include <complex>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -86,6 +87,8 @@ private:
     void tunerWorkerLoop();
     void analyseTunerBuffer(const std::array<float, kTunerBufferFrames> &samples);
     void requestCrossfade() { mCrossfadeRequested.store(true, std::memory_order_release); }
+    static void fft(std::vector<std::complex<float>> &data, bool inverse);
+    void processIrPartition();
 
     std::shared_ptr<oboe::AudioStream> mOutStream;
     std::shared_ptr<oboe::AudioStream> mInStream;
@@ -159,8 +162,14 @@ private:
     std::atomic<bool> mTunerWorkerRunning{true};
     std::atomic<bool> mRecoveryRequested{false};
     std::thread mTunerWorker;
-    std::vector<float> mIrCoefficients;
-    std::vector<float> mIrHistory;
+    static constexpr size_t kIrPartitionFrames = 256;
+    static constexpr size_t kIrFftFrames = kIrPartitionFrames * 2;
+    std::vector<std::vector<std::complex<float>>> mIrPartitions;
+    std::vector<std::vector<std::complex<float>>> mIrInputSpectra;
+    std::vector<std::complex<float>> mIrFftBuffer;
+    std::vector<float> mIrInputBlock;
+    std::vector<float> mIrOutputBlock;
+    std::vector<float> mIrOverlap;
     std::mutex mIrMutex;
     size_t mDelayWriteIndex{0};
     size_t mReverbWriteIndex{0};
@@ -169,7 +178,8 @@ private:
     size_t mLooperLength{0};
     size_t mTunerWriteIndex{0};
     int mTunerWriteBuffer{0};
-    size_t mIrWriteIndex{0};
+    size_t mIrBlockIndex{0};
+    size_t mIrSpectrumIndex{0};
     float mChorusPhase{0.0f};
     float mEqLowState{0.0f};
     float mEqHighState{0.0f};

@@ -151,13 +151,14 @@ bool AudioEngine::loadIr(const std::string &wavPath, std::string &outError) {
     char riff[4], wave[4]; uint32_t riffSize = 0;
     file.read(riff, 4); file.read(reinterpret_cast<char *>(&riffSize), 4); file.read(wave, 4);
     if (std::strncmp(riff, "RIFF", 4) || std::strncmp(wave, "WAVE", 4)) { outError = "El IR debe ser WAV PCM o Float"; return false; }
-    uint16_t format = 0, channels = 0, bits = 0; uint32_t dataSize = 0; std::streampos dataPos{}; bool hasData = false;
+    uint16_t format = 0, channels = 0, bits = 0; uint32_t wavSampleRate = 0, dataSize = 0; std::streampos dataPos{}; bool hasData = false;
     while (file && !hasData) {
         char id[4]; uint32_t size = 0; file.read(id, 4); file.read(reinterpret_cast<char *>(&size), 4);
         if (!file) break;
         if (!std::strncmp(id, "fmt ", 4)) {
             file.read(reinterpret_cast<char *>(&format), 2); file.read(reinterpret_cast<char *>(&channels), 2);
-            file.seekg(10, std::ios::cur); file.read(reinterpret_cast<char *>(&bits), 2);
+            file.read(reinterpret_cast<char *>(&wavSampleRate), 4);
+            file.seekg(6, std::ios::cur); file.read(reinterpret_cast<char *>(&bits), 2);
             if (size > 16) file.seekg(size - 16, std::ios::cur);
         } else if (!std::strncmp(id, "data", 4)) { dataPos = file.tellg(); dataSize = size; hasData = true; file.seekg(size, std::ios::cur); }
         else file.seekg(size, std::ios::cur);
@@ -166,9 +167,12 @@ bool AudioEngine::loadIr(const std::string &wavPath, std::string &outError) {
     if (!hasData || channels == 0 || (format != 1 && format != 3)) { outError = "Formato WAV no compatible"; return false; }
     file.clear(); file.seekg(dataPos);
     const size_t bytesPerSample = bits / 8; const size_t frames = dataSize / std::max<size_t>(bytesPerSample * channels, 1);
-    // 512 taps keeps direct convolution predictable on mid-range Android CPUs.
-    const size_t taps = std::min<size_t>(frames, 512); std::vector<float> ir(taps);
-    for (size_t i = 0; i < taps; ++i) {
+    // Un segundo cubre ampliamente cabinets habituales y mantiene una carga
+    // predecible en telefonos; no se pretende usar este bloque como reverb IR.
+    const size_t sourceFrames = std::min<size_t>(frames, std::max<uint32_t>(wavSampleRate, 1));
+    if (sourceFrames == 0) { outError = "El IR no contiene audio"; return false; }
+    std::vector<float> source(sourceFrames);
+    for (size_t i = 0; i < sourceFrames; ++i) {
         float sum = 0.0f;
         for (uint16_t ch = 0; ch < channels; ++ch) {
             if (format == 3 && bits == 32) { float value; file.read(reinterpret_cast<char *>(&value), 4); sum += value; }
@@ -176,13 +180,88 @@ bool AudioEngine::loadIr(const std::string &wavPath, std::string &outError) {
             else if (format == 1 && bits == 24) { unsigned char b[3]; file.read(reinterpret_cast<char *>(b), 3); int32_t value = b[0] | (b[1] << 8) | (b[2] << 16); if (value & 0x800000) value |= ~0xFFFFFF; sum += value / 8388608.0f; }
             else { outError = "Profundidad WAV no compatible"; return false; }
         }
-        ir[i] = sum / channels;
+        source[i] = sum / channels;
+    }
+    if (wavSampleRate == 0) { outError = "El IR no declara frecuencia de muestreo"; return false; }
+    const uint32_t targetRate = std::max(mSampleRate.load(), 1);
+    const size_t targetFrames = std::max<size_t>(1, static_cast<size_t>(source.size() * static_cast<double>(targetRate) / wavSampleRate));
+    std::vector<float> ir(targetFrames);
+    for (size_t i = 0; i < targetFrames; ++i) {
+        const double sourcePosition = i * static_cast<double>(wavSampleRate) / targetRate;
+        const size_t left = std::min(static_cast<size_t>(sourcePosition), source.size() - 1);
+        const size_t right = std::min(left + 1, source.size() - 1);
+        const float fraction = static_cast<float>(sourcePosition - left);
+        ir[i] = source[left] * (1.0f - fraction) + source[right] * fraction;
     }
     float peak = 0.0f; for (float value : ir) peak = std::max(peak, std::abs(value));
-    if (peak > 0.0f) for (float &value : ir) value *= 0.95f / peak;
-    std::lock_guard<std::mutex> lock(mIrMutex); mIrCoefficients = std::move(ir); mIrHistory.assign(taps, 0.0f); mIrWriteIndex = 0;
+    if (peak > 1.0f) for (float &value : ir) value /= peak;
+
+    const size_t partitionCount = (ir.size() + kIrPartitionFrames - 1) / kIrPartitionFrames;
+    std::vector<std::vector<std::complex<float>>> partitions(
+        partitionCount, std::vector<std::complex<float>>(kIrFftFrames));
+    for (size_t partition = 0; partition < partitionCount; ++partition) {
+        for (size_t i = 0; i < kIrPartitionFrames; ++i) {
+            const size_t sourceIndex = partition * kIrPartitionFrames + i;
+            if (sourceIndex < ir.size()) partitions[partition][i] = ir[sourceIndex];
+        }
+        fft(partitions[partition], false);
+    }
+    std::lock_guard<std::mutex> lock(mIrMutex);
+    mIrPartitions = std::move(partitions);
+    mIrInputSpectra.assign(partitionCount, std::vector<std::complex<float>>(kIrFftFrames));
+    mIrFftBuffer.assign(kIrFftFrames, {});
+    mIrInputBlock.assign(kIrPartitionFrames, 0.0f);
+    mIrOutputBlock.assign(kIrPartitionFrames, 0.0f);
+    mIrOverlap.assign(kIrPartitionFrames, 0.0f);
+    mIrBlockIndex = 0; mIrSpectrumIndex = 0;
     requestCrossfade();
     return true;
+}
+
+void AudioEngine::fft(std::vector<std::complex<float>> &data, bool inverse) {
+    const size_t count = data.size();
+    for (size_t i = 1, j = 0; i < count; ++i) {
+        size_t bit = count >> 1;
+        for (; j & bit; bit >>= 1) j ^= bit;
+        j ^= bit;
+        if (i < j) std::swap(data[i], data[j]);
+    }
+    for (size_t length = 2; length <= count; length <<= 1) {
+        const float angle = (inverse ? 2.0f : -2.0f) * 3.14159265358979323846f / length;
+        const std::complex<float> step(std::cos(angle), std::sin(angle));
+        for (size_t offset = 0; offset < count; offset += length) {
+            std::complex<float> weight(1.0f, 0.0f);
+            for (size_t i = 0; i < length / 2; ++i) {
+                const auto even = data[offset + i];
+                const auto odd = data[offset + i + length / 2] * weight;
+                data[offset + i] = even + odd;
+                data[offset + i + length / 2] = even - odd;
+                weight *= step;
+            }
+        }
+    }
+    if (inverse) for (auto &value : data) value /= static_cast<float>(count);
+}
+
+void AudioEngine::processIrPartition() {
+    if (mIrPartitions.empty()) return;
+    std::fill(mIrFftBuffer.begin(), mIrFftBuffer.end(), std::complex<float>{});
+    for (size_t i = 0; i < kIrPartitionFrames; ++i) mIrFftBuffer[i] = mIrInputBlock[i];
+    fft(mIrFftBuffer, false);
+    mIrInputSpectra[mIrSpectrumIndex] = mIrFftBuffer;
+    std::fill(mIrFftBuffer.begin(), mIrFftBuffer.end(), std::complex<float>{});
+    for (size_t partition = 0; partition < mIrPartitions.size(); ++partition) {
+        const size_t inputIndex = (mIrSpectrumIndex + mIrPartitions.size() - partition) % mIrPartitions.size();
+        for (size_t bin = 0; bin < kIrFftFrames; ++bin) {
+            mIrFftBuffer[bin] += mIrInputSpectra[inputIndex][bin] * mIrPartitions[partition][bin];
+        }
+    }
+    fft(mIrFftBuffer, true);
+    for (size_t i = 0; i < kIrPartitionFrames; ++i) {
+        mIrOutputBlock[i] = mIrFftBuffer[i].real() + mIrOverlap[i];
+        mIrOverlap[i] = mIrFftBuffer[i + kIrPartitionFrames].real();
+    }
+    mIrSpectrumIndex = (mIrSpectrumIndex + 1) % mIrPartitions.size();
 }
 
 bool AudioEngine::start() {
@@ -535,20 +614,23 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *,
             }
         } else if (effect == 7) {
             std::unique_lock<std::mutex> lock(mIrMutex, std::try_to_lock);
-            if (lock.owns_lock() && !mIrCoefficients.empty()) {
+            if (lock.owns_lock() && !mIrPartitions.empty()) {
                 const float level = dbToLinear(mEffectParams[7][0].load());
                 const float lowCut = std::clamp(mEffectParams[7][1].load(), 20.0f, 300.0f);
                 const float highCut = std::clamp(mEffectParams[7][2].load(), 3000.0f, 20000.0f);
                 const float hpAlpha = std::exp(-6.2831853f * lowCut / mSampleRate.load());
                 const float lpAlpha = 1.0f - std::exp(-6.2831853f * highCut / mSampleRate.load());
                 for (int32_t i = 0; i < frames; ++i) {
-                    mIrHistory[mIrWriteIndex] = mMonoResult[i]; float sum = 0.0f; size_t history = mIrWriteIndex;
-                    for (size_t tap = 0; tap < mIrCoefficients.size(); ++tap) { sum += mIrCoefficients[tap] * mIrHistory[history]; history = history == 0 ? mIrHistory.size() - 1 : history - 1; }
-                    const float convolved = sum * level;
+                    const float convolved = mIrOutputBlock[mIrBlockIndex] * level;
+                    mIrInputBlock[mIrBlockIndex] = mMonoResult[i];
                     mIrLowpassState += lpAlpha * (convolved - mIrLowpassState);
                     mIrHighpassState = hpAlpha * (mIrHighpassState + mIrLowpassState - mIrPreviousInput);
                     mIrPreviousInput = mIrLowpassState;
-                    mMonoResult[i] = mIrHighpassState; mIrWriteIndex = (mIrWriteIndex + 1) % mIrHistory.size();
+                    mMonoResult[i] = mIrHighpassState;
+                    if (++mIrBlockIndex == kIrPartitionFrames) {
+                        processIrPartition();
+                        mIrBlockIndex = 0;
+                    }
                 }
             }
         } else if (effect == 8) {
