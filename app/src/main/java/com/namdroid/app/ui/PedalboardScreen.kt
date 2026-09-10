@@ -122,6 +122,7 @@ fun PedalboardScreen(
     }
     fun applyScene(index: Int) {
         if (index !in 0..3) return
+        engine.beginTransition()
         activeScene = index; val scene = rigs[activeRigIndex].scenes[index]
         blocks.indices.forEach { blockIndex -> val block = blocks[blockIndex]; val enabled = scene.enabledByBlock[block.id] ?: block.enabled; val raw = scene.parametersByBlock[block.id] ?: block.parameters; val parameters = block.type.parameters.associate { spec -> val value = raw[spec.key] ?: spec.default; spec.key to (if (value.isFinite()) value.coerceIn(spec.range) else spec.default) }; blocks[blockIndex] = block.copy(enabled = enabled, parameters = parameters) }
         syncEngine()
