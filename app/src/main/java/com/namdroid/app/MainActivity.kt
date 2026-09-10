@@ -87,7 +87,31 @@ private fun AppNav(engine: NamEngine, oauthCallback: Uri?, onOAuthConsumed: () -
         engine.setInputChannelMode(audioDevices.savedInputChannelMode())
     }
     DisposableEffect(Unit) {
-        onDispose { audioRouteController.clearForcedRoute() }
+        val deviceCallback = audioDevices.registerDeviceCallback {
+            routeChangeToken += 1
+            val recoveryToken = routeChangeToken
+            val wasRunning = running
+            if (wasRunning) {
+                engine.stop()
+                running = false
+                statusText = "Dispositivo de audio cambiado…"
+            }
+            val inputId = audioDevices.resolvedInputId()
+            val outputId = audioDevices.resolvedOutputId()
+            val forceSpeaker = outputId == AudioDeviceManager.FORCE_PHONE_SPEAKER_ID
+            audioRouteController.setForcePhoneSpeaker(forceSpeaker)
+            engine.setAudioDeviceIds(inputId, if (forceSpeaker) 0 else outputId)
+            if (wasRunning) routeHandler.postDelayed({
+                if (recoveryToken != routeChangeToken) return@postDelayed
+                running = engine.start()
+                statusText = if (running) "Audio recuperado • ${engine.getStreamSampleRate()} Hz"
+                    else "No se pudo recuperar la ruta de audio"
+            }, 500L)
+        }
+        onDispose {
+            audioDevices.unregisterDeviceCallback(deviceCallback)
+            audioRouteController.clearForcedRoute()
+        }
     }
 
     LaunchedEffect(oauthCallback) {
