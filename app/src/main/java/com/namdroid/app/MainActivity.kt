@@ -84,6 +84,7 @@ private fun AppNav(engine: NamEngine, oauthCallback: Uri?, onOAuthConsumed: () -
         audioRouteController.setForcePhoneSpeaker(forceSpeaker)
         engine.setAudioDeviceIds(inputId, if (forceSpeaker) 0 else outputId)
         engine.setSharingMode(audioDevices.savedSharingMode())
+        engine.setInputChannelMode(audioDevices.savedInputChannelMode())
     }
     DisposableEffect(Unit) {
         onDispose { audioRouteController.clearForcedRoute() }
@@ -138,11 +139,12 @@ private fun AppNav(engine: NamEngine, oauthCallback: Uri?, onOAuthConsumed: () -
             onPickModel = { pickNamFile.launch("*/*") },
             onBrowseTone3000 = { screen = Screen.TONE3000 },
             onLoadModelPath = { loadModel(File(it)) },
-            onAudioRouteChanged = { inputId, outputId, sharingMode ->
+            onAudioRouteChanged = { inputId, outputId, sharingMode, inputChannelMode ->
                 // Guardar primero y reiniciar de forma controlada. Android puede tardar
                 // unas decenas/centenas de ms en liberar el dispositivo anterior.
                 val routeSaved = audioDevices.save(inputId, outputId)
                 val modeSaved = audioDevices.saveSharingMode(sharingMode)
+                val channelSaved = audioDevices.saveInputChannelMode(inputChannelMode)
                 val wasRunning = running
                 routeChangeToken += 1
                 val myToken = routeChangeToken
@@ -156,11 +158,12 @@ private fun AppNav(engine: NamEngine, oauthCallback: Uri?, onOAuthConsumed: () -
                 val routeApplied = audioRouteController.setForcePhoneSpeaker(forceSpeaker)
                 engine.setAudioDeviceIds(inputId, if (forceSpeaker) 0 else outputId)
                 engine.setSharingMode(sharingMode)
+                engine.setInputChannelMode(inputChannelMode)
 
                 if (!wasRunning) {
                     statusText = when {
                         forceSpeaker && !routeApplied -> "Android no permitió forzar el altavoz interno"
-                        routeSaved && modeSaved -> "Ruta y modo de audio guardados"
+                        routeSaved && modeSaved && channelSaved -> "Ruta, modo y canal guardados"
                         else -> "Ruta lista, pero no se pudo guardar todo"
                     }
                 } else {
@@ -174,7 +177,7 @@ private fun AppNav(engine: NamEngine, oauthCallback: Uri?, onOAuthConsumed: () -
                         running = restarted
                         statusText = when {
                             forceSpeaker && !routeApplied -> "Android no permitió forzar el altavoz interno"
-                            restarted && routeSaved && modeSaved -> "Ruta aplicada • ${engine.getStreamSampleRate()} Hz"
+                            restarted && routeSaved && modeSaved && channelSaved -> "Ruta aplicada • ${engine.getStreamSampleRate()} Hz"
                             restarted -> "Ruta aplicada, pero no se pudo guardar todo"
                             else -> "No se pudo abrir esa ruta; probá otra entrada/salida"
                         }
