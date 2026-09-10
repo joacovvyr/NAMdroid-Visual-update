@@ -213,15 +213,19 @@ fun StageWorkbench(
     val resource = when (block.type) {
         BlockType.AMP -> R.drawable.amp
         BlockType.IR -> R.drawable.cab
-        BlockType.COMP -> R.drawable.comp
-        BlockType.DRIVE -> R.drawable.drive
-        BlockType.DELAY -> R.drawable.delay
-        BlockType.REVERB -> R.drawable.reverb
-        else -> R.drawable.pedal_shell
+        BlockType.COMP -> R.drawable.pedal_comp
+        BlockType.GATE -> R.drawable.pedal_gate
+        BlockType.DRIVE -> R.drawable.pedal_drive
+        BlockType.EQ -> R.drawable.pedal_eq
+        BlockType.CHORUS -> R.drawable.pedal_chorus
+        BlockType.DELAY -> R.drawable.pedal_delay
+        BlockType.REVERB -> R.drawable.pedal_reverb
+        else -> R.drawable.pedal_gate
     }
     Box(modifier.padding(vertical = 3.dp), contentAlignment = Alignment.Center) {
-        Image(painterResource(resource), null, Modifier.fillMaxSize(if (isPedal) .96f else .9f), contentScale = ContentScale.Fit,
-            colorFilter = if (isPedal && resource == R.drawable.pedal_shell) ColorFilter.tint(block.type.color, BlendMode.Color) else null)
+        if (block.type !in setOf(BlockType.INPUT, BlockType.OUTPUT)) {
+            Image(painterResource(resource), null, Modifier.fillMaxSize(if (isPedal) .96f else .9f), contentScale = ContentScale.Fit)
+        }
         if (block.type == BlockType.INPUT || block.type == BlockType.OUTPUT) {
             Canvas(Modifier.fillMaxSize(.62f)) { drawCircle(block.type.color.copy(alpha = .2f)); drawCircle(block.type.color, size.minDimension * .34f, style = Stroke(if (large) 8.dp.toPx() else 3.dp.toPx())) }
             Text(block.type.shortLabel, fontWeight = FontWeight.Black, color = block.type.color, fontSize = if (large) 18.sp else 10.sp)
@@ -229,8 +233,8 @@ fun StageWorkbench(
         }
         val faceWidth = if (isPedal && large) .82f else if (isPedal) .66f else .72f
         Column(Modifier.fillMaxWidth(faceWidth).fillMaxHeight(if (isPedal) .88f else .62f), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(block.type.label.uppercase(), color = Color.White, fontSize = if (large) 13.sp else 8.sp, fontWeight = FontWeight.Black, letterSpacing = if (large) 1.sp else .5.sp, maxLines = 1)
-            Spacer(Modifier.height(if (large) 12.dp else 3.dp))
+            if (!isPedal) Text(block.type.label.uppercase(), color = Color.White, fontSize = if (large) 13.sp else 8.sp, fontWeight = FontWeight.Black, letterSpacing = if (large) 1.sp else .5.sp, maxLines = 1)
+            Spacer(Modifier.height(if (large) 18.dp else 5.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                 block.type.parameters.take(2).forEach { spec ->
                     GearKnob(spec, block.parameters[spec.key] ?: spec.default, block.type.color, large, change?.let { action -> { value -> action(spec, value) } })
