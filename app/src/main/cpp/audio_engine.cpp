@@ -7,6 +7,7 @@
 #include <cstring>
 #include <fstream>
 #include <chrono>
+#include <thread>
 
 #include "NAM/get_dsp.h"
 
@@ -35,9 +36,63 @@ AudioEngine::AudioEngine() {
     mEffectParams[9][0].store(1.2f); mEffectParams[9][1].store(45.0f); mEffectParams[9][2].store(30.0f);
     const int defaults[] = {8, 1, 2, 3, 7, 4, 9, 5, 6};
     for (int i = 0; i < 9; ++i) mEffectOrder[i].store(defaults[i]);
+    mTunerWorker = std::thread(&AudioEngine::tunerWorkerLoop, this);
 }
 
-AudioEngine::~AudioEngine() { stop(); }
+AudioEngine::~AudioEngine() {
+    stop();
+    mTunerWorkerRunning.store(false, std::memory_order_release);
+    if (mTunerWorker.joinable()) mTunerWorker.join();
+}
+
+void AudioEngine::tunerWorkerLoop() {
+    while (mTunerWorkerRunning.load(std::memory_order_acquire)) {
+        bool analysed = false;
+        for (int slot = 0; slot < 2; ++slot) {
+            int expected = 2;
+            if (mTunerBufferStates[slot].compare_exchange_strong(
+                    expected, 3, std::memory_order_acq_rel)) {
+                analyseTunerBuffer(mTunerBuffers[slot]);
+                mTunerBufferStates[slot].store(0, std::memory_order_release);
+                analysed = true;
+            }
+        }
+        if (!analysed) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+}
+
+void AudioEngine::analyseTunerBuffer(
+        const std::array<float, kTunerBufferFrames> &samples) {
+    if (!mTunerEnabled.load(std::memory_order_relaxed)) return;
+    const int sampleRate = std::max(mSampleRate.load(), 1);
+    const int minLag = std::max(sampleRate / 1200, 1);
+    const int maxLag = std::min<int>(sampleRate / 55, samples.size() / 2);
+    float energy = 0.0f;
+    for (float sample : samples) energy += sample * sample;
+    if (energy / samples.size() <= 1e-7f) {
+        mDetectedFrequency.store(0.0f);
+        return;
+    }
+    float best = 0.0f;
+    int bestLag = 0;
+    for (int lag = minLag; lag <= maxLag; ++lag) {
+        float correlation = 0.0f;
+        for (size_t n = 0; n + lag < samples.size(); n += 2) {
+            correlation += samples[n] * samples[n + lag];
+        }
+        if (correlation > best) {
+            best = correlation;
+            bestLag = lag;
+        }
+    }
+    if (bestLag > 0) {
+        const float measured = static_cast<float>(sampleRate) / bestLag;
+        const float previous = mDetectedFrequency.load();
+        mDetectedFrequency.store(previous > 0.0f
+            ? previous * 0.7f + measured * 0.3f
+            : measured);
+    }
+}
 
 void AudioEngine::setEffectEnabled(int effectId, bool enabled) {
     if (effectId >= 1 && effectId <= 9) mEffectEnabled[effectId].store(enabled);
@@ -224,7 +279,6 @@ bool AudioEngine::start() {
     mReverbBuffer.assign(std::max(mSampleRate.load() / 2, 1), 0.0f);
     mChorusBuffer.assign(std::max(mSampleRate.load() / 10, 1), 0.0f);
     mLooperBuffer.assign(std::max(mSampleRate.load() * 60, 1), 0.0f);
-    mTunerBuffer.assign(4096, 0.0f);
     mDelayWriteIndex = 0;
     mReverbWriteIndex = 0;
     mChorusWriteIndex = 0;
@@ -360,24 +414,25 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *,
         mSmoothedInputGain += (inputTarget - mSmoothedInputGain) * smoothing;
         mMonoResult[i] = mInputBuffer[i] * mSmoothedInputGain;
         inputSquares += mMonoResult[i] * mMonoResult[i];
-        if (mTunerEnabled.load() && !mTunerBuffer.empty()) {
-            mTunerBuffer[mTunerWriteIndex++] = mMonoResult[i];
-            if (mTunerWriteIndex == mTunerBuffer.size()) {
-                const int sampleRate = mSampleRate.load();
-                const int minLag = std::max(sampleRate / 1200, 1);
-                const int maxLag = std::min<int>(sampleRate / 55, mTunerBuffer.size() / 2);
-                float best = 0.0f; int bestLag = 0;
-                for (int lag = minLag; lag <= maxLag; ++lag) {
-                    float corr = 0.0f;
-                    for (size_t n = 0; n + lag < mTunerBuffer.size(); n += 2) corr += mTunerBuffer[n] * mTunerBuffer[n + lag];
-                    if (corr > best) { best = corr; bestLag = lag; }
+        if (mTunerEnabled.load(std::memory_order_relaxed)) {
+            if (mTunerWriteBuffer < 0) {
+                for (int slot = 0; slot < 2; ++slot) {
+                    int expected = 0;
+                    if (mTunerBufferStates[slot].compare_exchange_strong(
+                            expected, 1, std::memory_order_acq_rel)) {
+                        mTunerWriteBuffer = slot;
+                        mTunerWriteIndex = 0;
+                        break;
+                    }
                 }
-                if (bestLag > 0 && inputSquares / std::max(frames, 1) > 1e-7f) {
-                    const float measured = static_cast<float>(sampleRate) / bestLag;
-                    const float previous = mDetectedFrequency.load();
-                    mDetectedFrequency.store(previous > 0.0f ? previous * 0.7f + measured * 0.3f : measured);
+            }
+            if (mTunerWriteBuffer >= 0) {
+                mTunerBuffers[mTunerWriteBuffer][mTunerWriteIndex++] = mMonoResult[i];
+                if (mTunerWriteIndex == kTunerBufferFrames) {
+                    mTunerBufferStates[mTunerWriteBuffer].store(2, std::memory_order_release);
+                    mTunerWriteBuffer = -1;
+                    mTunerWriteIndex = 0;
                 }
-                mTunerWriteIndex = 0;
             }
         }
     }
