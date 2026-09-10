@@ -3,6 +3,9 @@ package com.namdroid.app.audio
 import android.content.Context
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
+import android.media.AudioDeviceCallback
+import android.os.Handler
+import android.os.Looper
 
 data class AudioDeviceOption(
     val id: Int,
@@ -20,6 +23,7 @@ class AudioDeviceManager(context: Context) {
         private const val KEY_INPUT = "input_device_id"
         private const val KEY_OUTPUT = "output_device_id"
         private const val KEY_SHARING_MODE = "sharing_mode"
+        private const val KEY_INPUT_CHANNEL = "input_channel_mode"
     }
     private val appContext = context.applicationContext
     private val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -49,6 +53,7 @@ class AudioDeviceManager(context: Context) {
     fun savedInputId(): Int = prefs.getInt(KEY_INPUT, 0)
     fun savedOutputId(): Int = prefs.getInt(KEY_OUTPUT, 0)
     fun savedSharingMode(): Int = prefs.getInt(KEY_SHARING_MODE, 0).coerceIn(0, 2)
+    fun savedInputChannelMode(): Int = prefs.getInt(KEY_INPUT_CHANNEL, 0).coerceIn(0, 2)
     fun resolvedInputId(): Int = savedInputId().takeIf { saved -> saved == 0 || inputDevices().any { it.id == saved } } ?: 0
     fun resolvedOutputId(): Int = savedOutputId().takeIf { saved -> saved == 0 || outputDevices().any { it.id == saved } } ?: 0
 
@@ -62,8 +67,24 @@ class AudioDeviceManager(context: Context) {
     fun saveSharingMode(mode: Int): Boolean =
         prefs.edit().putInt(KEY_SHARING_MODE, mode.coerceIn(0, 2)).commit()
 
+    fun saveInputChannelMode(mode: Int): Boolean =
+        prefs.edit().putInt(KEY_INPUT_CHANNEL, mode.coerceIn(0, 2)).commit()
+
     fun labelForInput(id: Int): String = inputDevices().firstOrNull { it.id == id }?.displayName ?: "Sistema / automático"
     fun labelForOutput(id: Int): String = outputDevices().firstOrNull { it.id == id }?.displayName ?: "Sistema / automático"
+
+    fun registerDeviceCallback(onChanged: () -> Unit): AudioDeviceCallback {
+        val callback = object : AudioDeviceCallback() {
+            override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) = onChanged()
+            override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) = onChanged()
+        }
+        audioManager.registerAudioDeviceCallback(callback, Handler(Looper.getMainLooper()))
+        return callback
+    }
+
+    fun unregisterDeviceCallback(callback: AudioDeviceCallback) {
+        audioManager.unregisterAudioDeviceCallback(callback)
+    }
 
     private fun systemDefault(name: String, input: Boolean, output: Boolean) =
         AudioDeviceOption(0, name, "Android", input, output)

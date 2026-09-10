@@ -75,6 +75,11 @@ Java_com_namdroid_app_audio_NamEngine_nativeSetEffectParam(JNIEnv *, jobject, ji
     if (gEngine) gEngine->setEffectParam(effectId, param, value);
 }
 
+JNIEXPORT void JNICALL
+Java_com_namdroid_app_audio_NamEngine_nativeBeginTransition(JNIEnv *, jobject) {
+    if (gEngine) gEngine->beginTransition();
+}
+
 JNIEXPORT jstring JNICALL
 Java_com_namdroid_app_audio_NamEngine_nativeLoadIr(JNIEnv *env, jobject, jstring path) {
     if (!gEngine) gEngine = std::make_unique<AudioEngine>();
@@ -141,5 +146,18 @@ Java_com_namdroid_app_audio_NamEngine_nativeSetSharingMode(JNIEnv *, jobject, ji
     if (!gEngine) gEngine = std::make_unique<AudioEngine>();
     gEngine->setSharingMode(mode);
 }
+
+JNIEXPORT void JNICALL
+Java_com_namdroid_app_audio_NamEngine_nativeSetInputChannelMode(JNIEnv *, jobject, jint mode) {
+    if (!gEngine) gEngine = std::make_unique<AudioEngine>();
+    gEngine->setInputChannelMode(mode);
+}
+
+JNIEXPORT jint JNICALL Java_com_namdroid_app_audio_NamEngine_nativeGetInputChannelCount(JNIEnv *, jobject) { return gEngine ? gEngine->getInputChannelCount() : 0; }
+JNIEXPORT jint JNICALL Java_com_namdroid_app_audio_NamEngine_nativeGetOutputChannelCount(JNIEnv *, jobject) { return gEngine ? gEngine->getOutputChannelCount() : 0; }
+JNIEXPORT jint JNICALL Java_com_namdroid_app_audio_NamEngine_nativeGetActualSharingMode(JNIEnv *, jobject) { return gEngine ? gEngine->getActualSharingMode() : 0; }
+JNIEXPORT jint JNICALL Java_com_namdroid_app_audio_NamEngine_nativeGetBufferSizeFrames(JNIEnv *, jobject) { return gEngine ? gEngine->getBufferSizeFrames() : 0; }
+JNIEXPORT jint JNICALL Java_com_namdroid_app_audio_NamEngine_nativeGetXRunCount(JNIEnv *, jobject) { return gEngine ? gEngine->getXRunCount() : 0; }
+JNIEXPORT jdouble JNICALL Java_com_namdroid_app_audio_NamEngine_nativeGetCallbackLoadPercent(JNIEnv *, jobject) { return gEngine ? gEngine->getLastCallbackLoadPercent() : 0.0; }
 
 } // extern "C"

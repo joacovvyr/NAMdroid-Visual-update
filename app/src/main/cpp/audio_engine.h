@@ -2,9 +2,11 @@
 
 #include <atomic>
 #include <array>
+#include <chrono>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <oboe/Oboe.h>
@@ -32,11 +34,12 @@ public:
 
     void setInputGainDb(float db) { mInputGainLinear.store(dbToLinear(db)); }
     void setOutputGainDb(float db) { mOutputGainLinear.store(dbToLinear(db)); }
-    void setBypass(bool bypass) { mBypass.store(bypass); }
+    void setBypass(bool bypass) { mBypass.store(bypass); requestCrossfade(); }
     void setEffectEnabled(int effectId, bool enabled);
     void setEffectAmount(int effectId, float amount);
     void setEffectOrder(const int *order, int count);
     void setEffectParam(int effectId, int param, float value);
+    void beginTransition() { requestCrossfade(); }
     void setTunerEnabled(bool enabled) { mTunerEnabled.store(enabled); }
     void setAudioDeviceIds(int32_t inputDeviceId, int32_t outputDeviceId) {
         mInputDeviceId.store(inputDeviceId);
@@ -44,6 +47,8 @@ public:
     }
     // 0 = Auto (Exclusive con fallback a Shared), 1 = Exclusive, 2 = Shared.
     void setSharingMode(int32_t mode) { mSharingMode.store(mode < 0 ? 0 : (mode > 2 ? 2 : mode)); }
+    // 0 = mezcla/mono automatico, 1 = canal 1, 2 = canal 2.
+    void setInputChannelMode(int32_t mode) { mInputChannelMode.store(mode < 0 ? 0 : (mode > 2 ? 2 : mode)); }
     void looperCommand(int command);
     float getInputLevelDb() const { return mInputLevelDb.load(); }
     float getOutputLevelDb() const { return mOutputLevelDb.load(); }
@@ -54,6 +59,11 @@ public:
     double getLastModelSampleRate() const { return mLastModelSampleRate.load(); }
     int32_t getStreamSampleRate() const { return mSampleRate.load(); }
     double getLastCallbackLoadPercent() const { return mLastLoadPercent.load(); }
+    int32_t getInputChannelCount() const { return mInChannelCount.load(); }
+    int32_t getOutputChannelCount() const { return mOutChannelCount.load(); }
+    int32_t getActualSharingMode() const { return mActualSharingMode.load(); }
+    int32_t getBufferSizeFrames() const { return mBufferSizeFrames.load(); }
+    int32_t getXRunCount() const { return mXRunCount.load(); }
 
     // oboe::AudioStreamDataCallback
     oboe::DataCallbackResult onAudioReady(oboe::AudioStream *outputStream, void *audioData,
@@ -70,6 +80,12 @@ private:
     // en el callback de audio) y para llamar a DSP::Reset(), que es quien
     // dimensiona los buffers internos del modelo (ver loadModel()).
     static constexpr int32_t kMaxBufferFrames = 4096;
+    static constexpr size_t kTunerBufferFrames = 4096;
+    static constexpr size_t kTransitionFrames = 256;
+
+    void tunerWorkerLoop();
+    void analyseTunerBuffer(const std::array<float, kTunerBufferFrames> &samples);
+    void requestCrossfade() { mCrossfadeRequested.store(true, std::memory_order_release); }
 
     std::shared_ptr<oboe::AudioStream> mOutStream;
     std::shared_ptr<oboe::AudioStream> mInStream;
@@ -94,6 +110,9 @@ private:
     std::atomic<bool> mTunerEnabled{false};
     std::atomic<float> mDetectedFrequency{0.0f};
     std::atomic<int> mLooperState{0}; // 0 stopped, 1 record, 2 play, 3 overdub
+    std::atomic<int> mPendingLooperCommand{-1};
+    std::atomic<size_t> mLooperPositionSnapshot{0};
+    std::atomic<size_t> mLooperLengthSnapshot{0};
     std::atomic<int32_t> mSampleRate{48000};
     std::atomic<double> mLastModelSampleRate{-1.0};
     std::atomic<double> mLastLoadPercent{0.0};
@@ -109,6 +128,19 @@ private:
     std::atomic<int32_t> mInputDeviceId{0};
     std::atomic<int32_t> mOutputDeviceId{0};
     std::atomic<int32_t> mSharingMode{0};
+    std::atomic<int32_t> mActualSharingMode{0};
+    std::atomic<int32_t> mInputChannelMode{0};
+    std::atomic<int32_t> mBufferSizeFrames{0};
+    std::atomic<int32_t> mXRunCount{0};
+    std::atomic<bool> mCrossfadeRequested{false};
+
+    // Objetivos atomicos + valores suavizados usados solamente por audio.
+    float mSmoothedInputGain{1.0f};
+    float mSmoothedOutputGain{1.0f};
+    std::array<float, kTransitionFrames> mTransitionTail{};
+    size_t mTransitionTailWrite{0};
+    size_t mCrossfadeRead{0};
+    size_t mCrossfadeRemaining{0};
 
     // Buffers de trabajo reutilizados en el hilo de audio (nada de allocs ahi)
     std::vector<float> mInputBuffer;       // mono, tras downmix si hace falta
@@ -120,7 +152,13 @@ private:
     std::vector<float> mReverbBuffer;
     std::vector<float> mChorusBuffer;
     std::vector<float> mLooperBuffer;
-    std::vector<float> mTunerBuffer;
+    // Doble buffer SPSC para que la autocorrelacion nunca corra en el callback.
+    // Estados: 0 libre, 1 escribiendo, 2 listo, 3 analizando.
+    std::array<std::array<float, kTunerBufferFrames>, 2> mTunerBuffers{};
+    std::array<std::atomic<int>, 2> mTunerBufferStates{{1, 0}};
+    std::atomic<bool> mTunerWorkerRunning{true};
+    std::atomic<bool> mRecoveryRequested{false};
+    std::thread mTunerWorker;
     std::vector<float> mIrCoefficients;
     std::vector<float> mIrHistory;
     std::mutex mIrMutex;
@@ -130,6 +168,7 @@ private:
     size_t mLooperPosition{0};
     size_t mLooperLength{0};
     size_t mTunerWriteIndex{0};
+    int mTunerWriteBuffer{0};
     size_t mIrWriteIndex{0};
     float mChorusPhase{0.0f};
     float mEqLowState{0.0f};

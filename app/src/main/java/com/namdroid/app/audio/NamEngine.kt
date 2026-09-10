@@ -30,6 +30,7 @@ class NamEngine {
     fun setEffectAmount(effectId: Int, amount: Float) = nativeSetEffectAmount(effectId, amount)
     fun setEffectOrder(order: IntArray) = nativeSetEffectOrder(order)
     fun setEffectParam(effectId: Int, param: Int, value: Float) = nativeSetEffectParam(effectId, param, value)
+    fun beginTransition() = nativeBeginTransition()
     fun loadIr(absolutePath: String): String = nativeLoadIr(absolutePath)
     fun setTunerEnabled(enabled: Boolean) = nativeSetTunerEnabled(enabled)
     fun getInputLevelDb(): Float = nativeGetInputLevelDb()
@@ -48,6 +49,13 @@ class NamEngine {
 
     /** 0 = Auto (Exclusive -> Shared), 1 = Exclusive, 2 = Shared. */
     fun setSharingMode(mode: Int) = nativeSetSharingMode(mode.coerceIn(0, 2))
+    fun setInputChannelMode(mode: Int) = nativeSetInputChannelMode(mode.coerceIn(0, 2))
+    fun getInputChannelCount(): Int = nativeGetInputChannelCount()
+    fun getOutputChannelCount(): Int = nativeGetOutputChannelCount()
+    fun getActualSharingMode(): Int = nativeGetActualSharingMode()
+    fun getBufferSizeFrames(): Int = nativeGetBufferSizeFrames()
+    fun getXRunCount(): Int = nativeGetXRunCount()
+    fun getCallbackLoadPercent(): Double = nativeGetCallbackLoadPercent()
 
     private external fun nativeStart(): Boolean
     private external fun nativeStop()
@@ -59,6 +67,7 @@ class NamEngine {
     private external fun nativeSetEffectAmount(effectId: Int, amount: Float)
     private external fun nativeSetEffectOrder(order: IntArray)
     private external fun nativeSetEffectParam(effectId: Int, param: Int, value: Float)
+    private external fun nativeBeginTransition()
     private external fun nativeLoadIr(path: String): String
     private external fun nativeSetTunerEnabled(enabled: Boolean)
     private external fun nativeGetInputLevelDb(): Float
@@ -71,4 +80,11 @@ class NamEngine {
     private external fun nativeGetStreamSampleRate(): Int
     private external fun nativeSetAudioDeviceIds(inputDeviceId: Int, outputDeviceId: Int)
     private external fun nativeSetSharingMode(mode: Int)
+    private external fun nativeSetInputChannelMode(mode: Int)
+    private external fun nativeGetInputChannelCount(): Int
+    private external fun nativeGetOutputChannelCount(): Int
+    private external fun nativeGetActualSharingMode(): Int
+    private external fun nativeGetBufferSizeFrames(): Int
+    private external fun nativeGetXRunCount(): Int
+    private external fun nativeGetCallbackLoadPercent(): Double
 }
