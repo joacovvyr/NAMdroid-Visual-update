@@ -234,27 +234,44 @@ fun StageWorkbench(
     }
     Box(modifier.padding(vertical = 3.dp), contentAlignment = Alignment.Center) {
         if (block.type !in setOf(BlockType.INPUT, BlockType.OUTPUT)) {
-            Image(painterResource(resource), null, Modifier.fillMaxSize(if (isPedal) .96f else .9f), contentScale = ContentScale.Fit)
+            Image(
+                painterResource(resource),
+                null,
+                if (isPedal) Modifier.fillMaxHeight(.88f).aspectRatio(2f / 3f) else Modifier.fillMaxSize(.9f),
+                contentScale = ContentScale.Fit
+            )
         }
         if (block.type == BlockType.INPUT || block.type == BlockType.OUTPUT) {
             Canvas(Modifier.fillMaxSize(.62f)) { drawCircle(block.type.color.copy(alpha = .2f)); drawCircle(block.type.color, size.minDimension * .34f, style = Stroke(if (large) 8.dp.toPx() else 3.dp.toPx())) }
             Text(block.type.shortLabel, fontWeight = FontWeight.Black, color = block.type.color, fontSize = if (large) 18.sp else 10.sp)
             return@Box
         }
-        val faceWidth = if (isPedal && large) .82f else if (isPedal) .66f else .72f
-        Column(Modifier.fillMaxWidth(faceWidth).fillMaxHeight(if (isPedal) .88f else .62f), horizontalAlignment = Alignment.CenterHorizontally) {
-            if (!isPedal) Text(block.type.label.uppercase(), color = Color.White, fontSize = if (large) 13.sp else 8.sp, fontWeight = FontWeight.Black, letterSpacing = if (large) 1.sp else .5.sp, maxLines = 1)
-            Spacer(Modifier.height(if (large) 18.dp else 5.dp))
-            if (isPedal || large) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                block.type.parameters.take(2).forEach { spec ->
-                    GearKnob(spec, block.parameters[spec.key] ?: spec.default, block.type.color, large, change?.let { action -> { value -> action(spec, value) } })
+        if (isPedal) {
+            // The overlay uses the same 2:3 coordinate space as every pedal asset.
+            // Controls therefore remain anchored to the chassis when its rendered size changes.
+            BoxWithConstraints(Modifier.fillMaxHeight(.88f).aspectRatio(2f / 3f)) {
+                Row(
+                    Modifier.align(Alignment.TopCenter).offset(y = maxHeight * .16f).fillMaxWidth(.72f),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    block.type.parameters.take(2).forEach { spec ->
+                        GearKnob(spec, block.parameters[spec.key] ?: spec.default, block.type.color, large, change?.let { action -> { value -> action(spec, value) } })
+                    }
+                }
+                Canvas(Modifier.align(Alignment.TopCenter).offset(y = maxHeight * .68f).size(if (large) 8.dp else 5.dp)) {
+                    drawCircle(if (block.enabled) StageAccent else Color(0xFF303840))
+                    if (block.enabled) drawCircle(Color.White.copy(alpha = .55f), size.minDimension * .2f)
+                }
+                Canvas(Modifier.align(Alignment.TopCenter).offset(y = maxHeight * .76f).size(if (large) 28.dp else 14.dp)) {
+                    val r = size.minDimension * .43f
+                    drawCircle(Brush.radialGradient(listOf(Color.White, Color(0xFF89939A), Color(0xFF242B30))), r)
+                    drawCircle(Color(0xFF1D2429), r * .7f, style = Stroke(if (large) 1.5.dp.toPx() else 1.dp.toPx()))
                 }
             }
-            Spacer(Modifier.weight(1f))
-            if (block.type != BlockType.IR) {
-                Canvas(Modifier.size(if (large) 9.dp else 5.dp)) { drawCircle(if (block.enabled) StageAccent else Color(0xFF303840)); if (block.enabled) drawCircle(Color.White.copy(alpha = .55f), size.minDimension * .2f) }
-                Spacer(Modifier.height(if (large) 6.dp else 2.dp))
-                Canvas(Modifier.size(if (large) 34.dp else 16.dp)) { val r = size.minDimension * .43f; drawCircle(Brush.radialGradient(listOf(Color.White, Color(0xFF89939A), Color(0xFF242B30))), r); drawCircle(Color(0xFF1D2429), r * .7f, style = Stroke(if (large) 2.dp.toPx() else 1.dp.toPx())) }
+        } else {
+            Column(Modifier.fillMaxWidth(.72f).fillMaxHeight(.62f), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(block.type.label.uppercase(), color = Color.White, fontSize = if (large) 13.sp else 8.sp, fontWeight = FontWeight.Black, letterSpacing = if (large) 1.sp else .5.sp, maxLines = 1)
+                Spacer(Modifier.weight(1f))
             }
         }
     }
