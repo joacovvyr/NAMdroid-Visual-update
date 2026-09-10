@@ -6,6 +6,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <oboe/Oboe.h>
@@ -78,6 +79,10 @@ private:
     // en el callback de audio) y para llamar a DSP::Reset(), que es quien
     // dimensiona los buffers internos del modelo (ver loadModel()).
     static constexpr int32_t kMaxBufferFrames = 4096;
+    static constexpr size_t kTunerBufferFrames = 4096;
+
+    void tunerWorkerLoop();
+    void analyseTunerBuffer(const std::array<float, kTunerBufferFrames> &samples);
 
     std::shared_ptr<oboe::AudioStream> mOutStream;
     std::shared_ptr<oboe::AudioStream> mInStream;
@@ -136,7 +141,12 @@ private:
     std::vector<float> mReverbBuffer;
     std::vector<float> mChorusBuffer;
     std::vector<float> mLooperBuffer;
-    std::vector<float> mTunerBuffer;
+    // Doble buffer SPSC para que la autocorrelacion nunca corra en el callback.
+    // Estados: 0 libre, 1 escribiendo, 2 listo, 3 analizando.
+    std::array<std::array<float, kTunerBufferFrames>, 2> mTunerBuffers{};
+    std::array<std::atomic<int>, 2> mTunerBufferStates{{1, 0}};
+    std::atomic<bool> mTunerWorkerRunning{true};
+    std::thread mTunerWorker;
     std::vector<float> mIrCoefficients;
     std::vector<float> mIrHistory;
     std::mutex mIrMutex;
@@ -146,6 +156,7 @@ private:
     size_t mLooperPosition{0};
     size_t mLooperLength{0};
     size_t mTunerWriteIndex{0};
+    int mTunerWriteBuffer{0};
     size_t mIrWriteIndex{0};
     float mChorusPhase{0.0f};
     float mEqLowState{0.0f};
