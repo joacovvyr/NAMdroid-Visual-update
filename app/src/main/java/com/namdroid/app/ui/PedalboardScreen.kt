@@ -53,7 +53,7 @@ fun PedalboardScreen(
     onPickModel: () -> Unit,
     onBrowseTone3000: () -> Unit,
     onLoadModelPath: (String) -> String,
-    onAudioRouteChanged: (Int, Int, Int) -> Unit,
+    onAudioRouteChanged: (Int, Int, Int, Int) -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -81,6 +81,7 @@ fun PedalboardScreen(
     var inputDeviceId by remember { mutableIntStateOf(audioDevices.savedInputId()) }
     var outputDeviceId by remember { mutableIntStateOf(audioDevices.savedOutputId()) }
     var sharingMode by remember { mutableIntStateOf(audioDevices.savedSharingMode()) }
+    var inputChannelMode by remember { mutableIntStateOf(audioDevices.savedInputChannelMode()) }
     var audioDeviceRevision by remember { mutableIntStateOf(0) }
     val inputDeviceLabel = remember(inputDeviceId, audioDeviceRevision) { audioDevices.labelForInput(inputDeviceId) }
     val outputDeviceLabel = remember(outputDeviceId, audioDeviceRevision) { audioDevices.labelForOutput(outputDeviceId) }
@@ -263,15 +264,17 @@ fun PedalboardScreen(
         inputDeviceId = inputDeviceId,
         outputDeviceId = outputDeviceId,
         sharingMode = sharingMode,
+        inputChannelMode = inputChannelMode,
         deviceRevision = audioDeviceRevision,
         export = { exportRigs.launch("NAMDroid-rigs.json") },
         import = { importRigs.launch(arrayOf("application/json", "text/plain")) },
         refreshDevices = { audioDeviceRevision++ },
-        applyRouting = { input, output, mode ->
+        applyRouting = { input, output, mode, channelMode ->
             inputDeviceId = input
             outputDeviceId = output
             sharingMode = mode
-            onAudioRouteChanged(input, output, mode)
+            inputChannelMode = channelMode
+            onAudioRouteChanged(input, output, mode, channelMode)
         },
         close = { showSettings = false },
     )
@@ -360,11 +363,12 @@ private fun SettingsDialog(
     inputDeviceId: Int,
     outputDeviceId: Int,
     sharingMode: Int,
+    inputChannelMode: Int,
     deviceRevision: Int,
     export: () -> Unit,
     import: () -> Unit,
     refreshDevices: () -> Unit,
-    applyRouting: (Int, Int, Int) -> Unit,
+    applyRouting: (Int, Int, Int, Int) -> Unit,
     close: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -374,6 +378,7 @@ private fun SettingsDialog(
     var pendingInput by remember(inputDeviceId, deviceRevision) { mutableIntStateOf(if (inputs.any { it.id == inputDeviceId }) inputDeviceId else 0) }
     var pendingOutput by remember(outputDeviceId, deviceRevision) { mutableIntStateOf(if (outputs.any { it.id == outputDeviceId }) outputDeviceId else 0) }
     var pendingSharingMode by remember(sharingMode) { mutableIntStateOf(sharingMode.coerceIn(0, 2)) }
+    var pendingInputChannelMode by remember(inputChannelMode) { mutableIntStateOf(inputChannelMode.coerceIn(0, 2)) }
 
     AlertDialog(
         onDismissRequest = close,
@@ -386,16 +391,24 @@ private fun SettingsDialog(
                 }
                 item { AudioDeviceDropdown("ENTRADA", inputs, pendingInput) { pendingInput = it } }
                 item { AudioDeviceDropdown("SALIDA", outputs, pendingOutput) { pendingOutput = it } }
+                item { InputChannelSelector(pendingInputChannelMode) { pendingInputChannelMode = it } }
                 item { SharingModeSelector(pendingSharingMode) { pendingSharingMode = it } }
                 item {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(onClick = refreshDevices, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Icon(Icons.Default.Refresh, null); Spacer(Modifier.width(6.dp)); Text("DETECTAR") }
-                        Button(onClick = { applyRouting(pendingInput, pendingOutput, pendingSharingMode) }, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Icon(Icons.Default.Cable, null); Spacer(Modifier.width(6.dp)); Text("APLICAR I/O") }
+                        Button(onClick = { applyRouting(pendingInput, pendingOutput, pendingSharingMode, pendingInputChannelMode) }, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Icon(Icons.Default.Cable, null); Spacer(Modifier.width(6.dp)); Text("APLICAR I/O") }
                     }
                     Text("Al aplicar una ruta, si el audio está activo NAMDroid reinicia el motor para abrir los dispositivos elegidos.", color = MutedText, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
                 }
                 item { HorizontalDivider() }
-                item { ListItem(headlineContent = { Text("Audio engine") }, supportingContent = { Text("${engine.getStreamSampleRate()} Hz • ${sharingModeLabel(pendingSharingMode)}") }, leadingContent = { Icon(Icons.Default.AudioFile, null) }) }
+                item {
+                    val actualMode = sharingModeLabel(engine.getActualSharingMode())
+                    ListItem(
+                        headlineContent = { Text("Audio engine") },
+                        supportingContent = { Text("${engine.getStreamSampleRate()} Hz • IN ${engine.getInputChannelCount()}ch / OUT ${engine.getOutputChannelCount()}ch • $actualMode\nBuffer ${engine.getBufferSizeFrames()} frames • DSP ${"%.1f".format(engine.getCallbackLoadPercent())}% • XRuns ${engine.getXRunCount()}") },
+                        leadingContent = { Icon(Icons.Default.AudioFile, null) },
+                    )
+                }
                 item { ListItem(headlineContent = { Text("MIDI control") }, supportingContent = { Text("${MidiController.deviceCount(context)} device(s) • PC: rigs • CC20–23: scenes • CC24: tuner • CC25–27: looper") }, leadingContent = { Icon(Icons.Default.Usb, null) }) }
                 item { ListItem(headlineContent = { Text("Rig backup") }, supportingContent = { Text("$rigCount saved rigs") }) }
                 item { Row { OutlinedButton(import, Modifier.weight(1f).heightIn(min = 48.dp)) { Text("IMPORT") }; Spacer(Modifier.width(8.dp)); Button(export, Modifier.weight(1f).heightIn(min = 48.dp)) { Text("EXPORT") } } }
@@ -403,6 +416,21 @@ private fun SettingsDialog(
         },
         confirmButton = { Button(close, modifier = Modifier.heightIn(min = 48.dp)) { Text("DONE") } },
     )
+}
+
+@Composable
+private fun InputChannelSelector(selectedMode: Int, onSelected: (Int) -> Unit) {
+    Column {
+        Text("CANAL DE ENTRADA", color = MutedText, style = MaterialTheme.typography.labelMedium)
+        Spacer(Modifier.height(5.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(0 to "MIX / AUTO", 1 to "CANAL 1", 2 to "CANAL 2").forEach { (mode, label) ->
+                if (selectedMode == mode) Button({ onSelected(mode) }, Modifier.weight(1f).heightIn(min = 48.dp)) { Text(label, maxLines = 1) }
+                else OutlinedButton({ onSelected(mode) }, Modifier.weight(1f).heightIn(min = 48.dp)) { Text(label, maxLines = 1) }
+            }
+        }
+        Text("En una interfaz USB estéreo, elegí el jack donde conectaste la guitarra para no mezclar ruido del otro canal.", color = MutedText, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
+    }
 }
 
 private fun sharingModeLabel(mode: Int): String = when (mode) {
