@@ -40,13 +40,23 @@ AudioEngine::AudioEngine() {
 }
 
 AudioEngine::~AudioEngine() {
-    stop();
     mTunerWorkerRunning.store(false, std::memory_order_release);
     if (mTunerWorker.joinable()) mTunerWorker.join();
+    stop();
 }
 
 void AudioEngine::tunerWorkerLoop() {
     while (mTunerWorkerRunning.load(std::memory_order_acquire)) {
+        if (mRecoveryRequested.exchange(false, std::memory_order_acq_rel)) {
+            LOGI("Recuperando streams fuera del callback de error");
+            if (!start()) {
+                // El ID USB puede haber dejado de existir. Volver a la ruta
+                // automatica mantiene la app con audio hasta que se reconecte.
+                mInputDeviceId.store(0);
+                mOutputDeviceId.store(0);
+                start();
+            }
+        }
         bool analysed = false;
         for (int slot = 0; slot < 2; ++slot) {
             int expected = 2;
@@ -95,7 +105,10 @@ void AudioEngine::analyseTunerBuffer(
 }
 
 void AudioEngine::setEffectEnabled(int effectId, bool enabled) {
-    if (effectId >= 1 && effectId <= 9) mEffectEnabled[effectId].store(enabled);
+    if (effectId >= 1 && effectId <= 9) {
+        const bool changed = mEffectEnabled[effectId].exchange(enabled) != enabled;
+        if (changed) requestCrossfade();
+    }
 }
 
 void AudioEngine::setEffectAmount(int effectId, float amount) {
@@ -120,18 +133,15 @@ void AudioEngine::setEffectParam(int effectId, int param, float value) {
 }
 
 float AudioEngine::getLooperProgress() const {
-    if (mLooperLength == 0) return 0.0f;
-    return static_cast<float>(mLooperPosition) / static_cast<float>(mLooperLength);
+    const size_t length = mLooperLengthSnapshot.load(std::memory_order_acquire);
+    if (length == 0) return 0.0f;
+    return static_cast<float>(mLooperPositionSnapshot.load(std::memory_order_acquire)) /
+        static_cast<float>(length);
 }
 
 void AudioEngine::looperCommand(int command) {
-    if (command == 4) {
-        mLooperState.store(0); mLooperPosition = 0; mLooperLength = 0;
-        std::fill(mLooperBuffer.begin(), mLooperBuffer.end(), 0.0f);
-    } else if (command == 1) {
-        mLooperPosition = 0; mLooperLength = 0; mLooperState.store(1);
-    } else if (command >= 0 && command <= 3) {
-        mLooperPosition = 0; mLooperState.store(command);
+    if (command >= 0 && command <= 4) {
+        mPendingLooperCommand.store(command, std::memory_order_release);
     }
 }
 
@@ -171,6 +181,7 @@ bool AudioEngine::loadIr(const std::string &wavPath, std::string &outError) {
     float peak = 0.0f; for (float value : ir) peak = std::max(peak, std::abs(value));
     if (peak > 0.0f) for (float &value : ir) value *= 0.95f / peak;
     std::lock_guard<std::mutex> lock(mIrMutex); mIrCoefficients = std::move(ir); mIrHistory.assign(taps, 0.0f); mIrWriteIndex = 0;
+    requestCrossfade();
     return true;
 }
 
@@ -180,18 +191,25 @@ bool AudioEngine::start() {
     stop();
 
     auto openStreams = [&](oboe::SharingMode sharingMode) -> bool {
-        oboe::AudioStreamBuilder outBuilder;
-        outBuilder.setDirection(oboe::Direction::Output)
-            ->setPerformanceMode(oboe::PerformanceMode::LowLatency)
-            ->setSharingMode(sharingMode)
-            ->setFormat(oboe::AudioFormat::Float)
-            ->setChannelCount(oboe::ChannelCount::Mono)
-            ->setSampleRate(48000)
-            ->setDataCallback(this)
-            ->setErrorCallback(this);
-        if (mOutputDeviceId.load() > 0) outBuilder.setDeviceId(mOutputDeviceId.load());
-
-        oboe::Result result = outBuilder.openStream(mOutStream);
+        auto openOutput = [&](int32_t sampleRate, int32_t channels) {
+            mOutStream.reset();
+            oboe::AudioStreamBuilder builder;
+            builder.setDirection(oboe::Direction::Output)
+                ->setPerformanceMode(oboe::PerformanceMode::LowLatency)
+                ->setSharingMode(sharingMode)
+                ->setFormat(oboe::AudioFormat::Float)
+                ->setChannelCount(channels)
+                ->setDataCallback(this)
+                ->setErrorCallback(this);
+            if (sampleRate > 0) builder.setSampleRate(sampleRate);
+            if (mOutputDeviceId.load() > 0) builder.setDeviceId(mOutputDeviceId.load());
+            return builder.openStream(mOutStream);
+        };
+        // Preferencia profesional: 48 kHz mono. Si el dispositivo la rechaza,
+        // negociar su frecuencia nativa y finalmente una salida estereo fija.
+        oboe::Result result = openOutput(48000, 1);
+        if (result != oboe::Result::OK) result = openOutput(0, 1);
+        if (result != oboe::Result::OK) result = openOutput(0, 2);
         if (result != oboe::Result::OK) {
             LOGE("Salida no disponible (%s): %s",
                  sharingMode == oboe::SharingMode::Exclusive ? "Exclusive" : "Shared",
@@ -203,18 +221,25 @@ bool AudioEngine::start() {
         mSampleRate.store(mOutStream->getSampleRate());
         mOutChannelCount.store(mOutStream->getChannelCount());
 
-        oboe::AudioStreamBuilder inBuilder;
         const int32_t requestedInputChannels = mInputChannelMode.load() == 0 ? 1 : 2;
-        inBuilder.setDirection(oboe::Direction::Input)
-            ->setPerformanceMode(oboe::PerformanceMode::LowLatency)
-            ->setSharingMode(sharingMode)
-            ->setFormat(oboe::AudioFormat::Float)
-            ->setChannelCount(requestedInputChannels)
-            ->setSampleRate(mOutStream->getSampleRate())
-            ->setInputPreset(oboe::InputPreset::Unprocessed);
-        if (mInputDeviceId.load() > 0) inBuilder.setDeviceId(mInputDeviceId.load());
-
-        result = inBuilder.openStream(mInStream);
+        auto openInput = [&](int32_t channels) {
+            mInStream.reset();
+            oboe::AudioStreamBuilder builder;
+            builder.setDirection(oboe::Direction::Input)
+                ->setPerformanceMode(oboe::PerformanceMode::LowLatency)
+                ->setSharingMode(sharingMode)
+                ->setFormat(oboe::AudioFormat::Float)
+                ->setChannelCount(channels)
+                ->setInputPreset(oboe::InputPreset::Unprocessed);
+            builder.setSampleRate(mOutStream->getSampleRate());
+            if (mInputDeviceId.load() > 0) builder.setDeviceId(mInputDeviceId.load());
+            return builder.openStream(mInStream);
+        };
+        result = openInput(requestedInputChannels);
+        if (result != oboe::Result::OK && requestedInputChannels > 1) {
+            LOGI("Entrada estereo rechazada; fallback automatico a mono");
+            result = openInput(1);
+        }
         if (result != oboe::Result::OK) {
             LOGE("Entrada no disponible (%s): %s",
                  sharingMode == oboe::SharingMode::Exclusive ? "Exclusive" : "Shared",
@@ -349,6 +374,7 @@ bool AudioEngine::loadModel(const std::string &namFilePath, std::string &outErro
             mModel = std::move(newModel);
         }
         mLastModelSampleRate.store(sr);
+        requestCrossfade();
         LOGI("Modelo NAM cargado: %s (sample rate esperado: %.0f Hz)", namFilePath.c_str(), sr);
         return true;
     } catch (const std::exception &e) {
@@ -538,7 +564,53 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *,
         mMonoResult[i] *= mSmoothedOutputGain;
     }
 
-    const int looper = mLooperState.load();
+    // Crossfade corto contra la cola previa al cambiar escena, NAM, IR o
+    // bypass. No reserva memoria y puede continuar entre callbacks.
+    if (mCrossfadeRequested.exchange(false, std::memory_order_acq_rel)) {
+        mCrossfadeRead = mTransitionTailWrite;
+        mCrossfadeRemaining = kTransitionFrames;
+    }
+    for (int32_t i = 0; i < frames; ++i) {
+        if (mCrossfadeRemaining > 0) {
+            const size_t progressed = kTransitionFrames - mCrossfadeRemaining;
+            const float t = static_cast<float>(progressed + 1) /
+                static_cast<float>(kTransitionFrames);
+            const float previous = mTransitionTail[mCrossfadeRead];
+            mCrossfadeRead = (mCrossfadeRead + 1) % kTransitionFrames;
+            mMonoResult[i] = previous * (1.0f - t) + mMonoResult[i] * t;
+            --mCrossfadeRemaining;
+        }
+        mTransitionTail[mTransitionTailWrite] = mMonoResult[i];
+        mTransitionTailWrite = (mTransitionTailWrite + 1) % kTransitionFrames;
+    }
+
+    const int pendingLooper = mPendingLooperCommand.exchange(-1, std::memory_order_acq_rel);
+    if (pendingLooper == 4) {
+        mLooperPosition = 0;
+        mLooperLength = 0;
+        mLooperState.store(0, std::memory_order_release);
+    } else if (pendingLooper == 1) {
+        mLooperPosition = 0;
+        mLooperLength = 0;
+        mLooperState.store(1, std::memory_order_release);
+    } else if (pendingLooper >= 0 && pendingLooper <= 3) {
+        // Cerrar la costura del loop antes de reproducirlo. Se hace una sola
+        // vez al recibir el comando, nunca desde el hilo de interfaz.
+        if (mLooperState.load(std::memory_order_relaxed) == 1 &&
+            (pendingLooper == 2 || pendingLooper == 3) && mLooperLength > 2) {
+            const size_t fadeFrames = std::min<size_t>(128, mLooperLength / 2);
+            for (size_t i = 0; i < fadeFrames; ++i) {
+                const float t = static_cast<float>(i) / std::max<size_t>(fadeFrames - 1, 1);
+                const size_t tail = mLooperLength - fadeFrames + i;
+                const float blended = mLooperBuffer[tail] * (1.0f - t) + mLooperBuffer[i] * t;
+                mLooperBuffer[tail] = blended;
+                mLooperBuffer[i] = blended;
+            }
+        }
+        mLooperPosition = 0;
+        mLooperState.store(pendingLooper, std::memory_order_release);
+    }
+    const int looper = mLooperState.load(std::memory_order_acquire);
     if (!mLooperBuffer.empty() && looper != 0) {
         for (int32_t i = 0; i < frames; ++i) {
             if (looper == 1) { if (mLooperPosition < mLooperBuffer.size()) { mLooperBuffer[mLooperPosition++] = mMonoResult[i]; mLooperLength = std::max(mLooperLength, mLooperPosition); } }
@@ -546,6 +618,8 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *,
         }
         if (looper == 1 && mLooperPosition >= mLooperBuffer.size()) { mLooperPosition = 0; mLooperState.store(2); }
     }
+    mLooperPositionSnapshot.store(mLooperPosition, std::memory_order_release);
+    mLooperLengthSnapshot.store(mLooperLength, std::memory_order_release);
     float outputSquares = 0.0f; for (int32_t i = 0; i < frames; ++i) { mMonoResult[i] = std::clamp(mMonoResult[i], -1.0f, 1.0f); outputSquares += mMonoResult[i] * mMonoResult[i]; }
     mOutputLevelDb.store(20.0f * std::log10(std::max(std::sqrt(outputSquares / std::max(frames, 1)), 1e-5f)));
 
@@ -577,7 +651,6 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *,
 }
 
 void AudioEngine::onErrorAfterClose(oboe::AudioStream *, oboe::Result error) {
-    LOGE("Stream cerrado por error: %s. Reintentando arranque...", oboe::convertToText(error));
-    stop();
-    start();
+    LOGE("Stream cerrado por error: %s. Recuperacion solicitada...", oboe::convertToText(error));
+    mRecoveryRequested.store(true, std::memory_order_release);
 }
