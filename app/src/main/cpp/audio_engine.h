@@ -34,11 +34,12 @@ public:
 
     void setInputGainDb(float db) { mInputGainLinear.store(dbToLinear(db)); }
     void setOutputGainDb(float db) { mOutputGainLinear.store(dbToLinear(db)); }
-    void setBypass(bool bypass) { mBypass.store(bypass); }
+    void setBypass(bool bypass) { mBypass.store(bypass); requestCrossfade(); }
     void setEffectEnabled(int effectId, bool enabled);
     void setEffectAmount(int effectId, float amount);
     void setEffectOrder(const int *order, int count);
     void setEffectParam(int effectId, int param, float value);
+    void beginTransition() { requestCrossfade(); }
     void setTunerEnabled(bool enabled) { mTunerEnabled.store(enabled); }
     void setAudioDeviceIds(int32_t inputDeviceId, int32_t outputDeviceId) {
         mInputDeviceId.store(inputDeviceId);
@@ -80,9 +81,11 @@ private:
     // dimensiona los buffers internos del modelo (ver loadModel()).
     static constexpr int32_t kMaxBufferFrames = 4096;
     static constexpr size_t kTunerBufferFrames = 4096;
+    static constexpr size_t kTransitionFrames = 256;
 
     void tunerWorkerLoop();
     void analyseTunerBuffer(const std::array<float, kTunerBufferFrames> &samples);
+    void requestCrossfade() { mCrossfadeRequested.store(true, std::memory_order_release); }
 
     std::shared_ptr<oboe::AudioStream> mOutStream;
     std::shared_ptr<oboe::AudioStream> mInStream;
@@ -107,6 +110,9 @@ private:
     std::atomic<bool> mTunerEnabled{false};
     std::atomic<float> mDetectedFrequency{0.0f};
     std::atomic<int> mLooperState{0}; // 0 stopped, 1 record, 2 play, 3 overdub
+    std::atomic<int> mPendingLooperCommand{-1};
+    std::atomic<size_t> mLooperPositionSnapshot{0};
+    std::atomic<size_t> mLooperLengthSnapshot{0};
     std::atomic<int32_t> mSampleRate{48000};
     std::atomic<double> mLastModelSampleRate{-1.0};
     std::atomic<double> mLastLoadPercent{0.0};
@@ -126,10 +132,15 @@ private:
     std::atomic<int32_t> mInputChannelMode{0};
     std::atomic<int32_t> mBufferSizeFrames{0};
     std::atomic<int32_t> mXRunCount{0};
+    std::atomic<bool> mCrossfadeRequested{false};
 
     // Objetivos atomicos + valores suavizados usados solamente por audio.
     float mSmoothedInputGain{1.0f};
     float mSmoothedOutputGain{1.0f};
+    std::array<float, kTransitionFrames> mTransitionTail{};
+    size_t mTransitionTailWrite{0};
+    size_t mCrossfadeRead{0};
+    size_t mCrossfadeRemaining{0};
 
     // Buffers de trabajo reutilizados en el hilo de audio (nada de allocs ahi)
     std::vector<float> mInputBuffer;       // mono, tras downmix si hace falta
@@ -146,6 +157,7 @@ private:
     std::array<std::array<float, kTunerBufferFrames>, 2> mTunerBuffers{};
     std::array<std::atomic<int>, 2> mTunerBufferStates{{1, 0}};
     std::atomic<bool> mTunerWorkerRunning{true};
+    std::atomic<bool> mRecoveryRequested{false};
     std::thread mTunerWorker;
     std::vector<float> mIrCoefficients;
     std::vector<float> mIrHistory;
