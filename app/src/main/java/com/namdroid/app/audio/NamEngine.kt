@@ -30,6 +30,7 @@ class NamEngine {
     fun setEffectAmount(effectId: Int, amount: Float) = nativeSetEffectAmount(effectId, amount)
     fun setEffectOrder(order: IntArray) = nativeSetEffectOrder(order)
     fun setEffectParam(effectId: Int, param: Int, value: Float) = nativeSetEffectParam(effectId, param, value)
+    fun beginTransition() = nativeBeginTransition()
     fun loadIr(absolutePath: String): String = nativeLoadIr(absolutePath)
     fun setTunerEnabled(enabled: Boolean) = nativeSetTunerEnabled(enabled)
     fun getInputLevelDb(): Float = nativeGetInputLevelDb()
@@ -66,6 +67,7 @@ class NamEngine {
     private external fun nativeSetEffectAmount(effectId: Int, amount: Float)
     private external fun nativeSetEffectOrder(order: IntArray)
     private external fun nativeSetEffectParam(effectId: Int, param: Int, value: Float)
+    private external fun nativeBeginTransition()
     private external fun nativeLoadIr(path: String): String
     private external fun nativeSetTunerEnabled(enabled: Boolean)
     private external fun nativeGetInputLevelDb(): Float
