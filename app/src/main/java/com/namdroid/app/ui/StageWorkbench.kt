@@ -210,21 +210,29 @@ fun StageWorkbench(
 
 @Composable private fun GearFace(block: PedalBlock, modifier: Modifier, large: Boolean, change: ((ParameterSpec, Float) -> Unit)? = null) {
     val isPedal = block.type !in setOf(BlockType.INPUT, BlockType.OUTPUT, BlockType.AMP, BlockType.IR)
-    val resource = when (block.type) { BlockType.AMP -> R.drawable.amp; BlockType.IR -> R.drawable.cab; else -> R.drawable.pedal_shell }
+    val resource = when (block.type) {
+        BlockType.AMP -> R.drawable.amp
+        BlockType.IR -> R.drawable.cab
+        BlockType.COMP -> R.drawable.comp
+        BlockType.DRIVE -> R.drawable.drive
+        BlockType.DELAY -> R.drawable.delay
+        BlockType.REVERB -> R.drawable.reverb
+        else -> R.drawable.pedal_shell
+    }
     Box(modifier.padding(vertical = 3.dp), contentAlignment = Alignment.Center) {
         Image(painterResource(resource), null, Modifier.fillMaxSize(if (isPedal) .96f else .9f), contentScale = ContentScale.Fit,
-            colorFilter = if (isPedal) ColorFilter.tint(block.type.color, BlendMode.Color) else null)
+            colorFilter = if (isPedal && resource == R.drawable.pedal_shell) ColorFilter.tint(block.type.color, BlendMode.Color) else null)
         if (block.type == BlockType.INPUT || block.type == BlockType.OUTPUT) {
             Canvas(Modifier.fillMaxSize(.62f)) { drawCircle(block.type.color.copy(alpha = .2f)); drawCircle(block.type.color, size.minDimension * .34f, style = Stroke(if (large) 8.dp.toPx() else 3.dp.toPx())) }
             Text(block.type.shortLabel, fontWeight = FontWeight.Black, color = block.type.color, fontSize = if (large) 18.sp else 10.sp)
             return@Box
         }
-        val faceWidth = if (isPedal) .66f else .72f
+        val faceWidth = if (isPedal && large) .82f else if (isPedal) .66f else .72f
         Column(Modifier.fillMaxWidth(faceWidth).fillMaxHeight(if (isPedal) .88f else .62f), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(block.type.shortLabel, color = Color.White, fontSize = if (large) 15.sp else 8.sp, fontWeight = FontWeight.Black, letterSpacing = if (large) 2.sp else 1.sp, maxLines = 1)
+            Text(block.type.label.uppercase(), color = Color.White, fontSize = if (large) 13.sp else 8.sp, fontWeight = FontWeight.Black, letterSpacing = if (large) 1.sp else .5.sp, maxLines = 1)
             Spacer(Modifier.height(if (large) 12.dp else 3.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                block.type.parameters.take(if (large) 4 else 2).forEach { spec ->
+                block.type.parameters.take(2).forEach { spec ->
                     GearKnob(spec, block.parameters[spec.key] ?: spec.default, block.type.color, large, change?.let { action -> { value -> action(spec, value) } })
                 }
             }
@@ -268,10 +276,18 @@ fun StageWorkbench(
                 IconButton(delete) { Icon(Icons.Default.DeleteOutline, "Quitar efecto") }
             }
         }
-        GearFace(block, Modifier.fillMaxWidth().heightIn(min = 170.dp, max = 250.dp), large = true, change = change)
-        Spacer(Modifier.height(8.dp))
-        LazyVerticalGrid(columns = GridCells.Adaptive(180.dp), modifier = Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 10.dp)) {
-            items(block.type.parameters, key = { it.key }) { spec -> StageParameter(block.id, spec, block.parameters[spec.key] ?: spec.default, block.type.color) { change(spec, it) } }
+        Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Surface(
+                modifier = Modifier.weight(.36f).fillMaxHeight(),
+                color = StageSurface,
+                shape = RoundedCornerShape(12.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, StageLine),
+            ) {
+                GearFace(block, Modifier.fillMaxSize().padding(8.dp), large = true, change = change)
+            }
+            LazyVerticalGrid(columns = GridCells.Adaptive(170.dp), modifier = Modifier.weight(.64f).fillMaxHeight(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 8.dp)) {
+                items(block.type.parameters, key = { it.key }) { spec -> StageParameter(block.id, spec, block.parameters[spec.key] ?: spec.default, block.type.color) { change(spec, it) } }
+            }
         }
     }
 }

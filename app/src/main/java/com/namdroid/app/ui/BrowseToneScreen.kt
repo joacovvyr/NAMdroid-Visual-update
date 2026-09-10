@@ -54,6 +54,7 @@ fun BrowseToneScreen(
     var expandedTone by remember { mutableStateOf<Long?>(null) }
     var models by remember { mutableStateOf<List<ToneModel>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
+    var filterMenu by remember { mutableStateOf(false) }
     var downloadingModelId by remember { mutableStateOf<Long?>(null) }
     var exportPath by rememberSaveable { mutableStateOf<String?>(null) }
     val saveNam = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
@@ -128,13 +129,13 @@ fun BrowseToneScreen(
 
     Column(Modifier.fillMaxSize().background(Carbon).safeDrawingPadding()) {
         Row(
-            Modifier.fillMaxWidth().height(64.dp).background(Panel).padding(horizontal = 14.dp),
+            Modifier.fillMaxWidth().height(54.dp).background(Panel).padding(horizontal = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") }
             Column {
-                Text("TONE3000", fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleLarge)
-                Text("NAM A2 CLOUD LIBRARY", color = MutedText, style = MaterialTheme.typography.labelSmall)
+                Text("TONE3000", fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
+                Text("NAM A2 LIBRARY", color = MutedText, style = MaterialTheme.typography.labelSmall)
             }
             Spacer(Modifier.weight(1f))
             user?.let {
@@ -166,7 +167,7 @@ fun BrowseToneScreen(
             return@Column
         }
 
-        Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
@@ -175,26 +176,41 @@ fun BrowseToneScreen(
                 leadingIcon = { Icon(Icons.Default.Search, null) },
                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(onSearch = { collection = null; scope.launch { loadCatalog() } }),
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).height(46.dp),
             )
-            Spacer(Modifier.width(10.dp))
-            Button(onClick = { collection = null; scope.launch { loadCatalog() } }, enabled = !loading) {
-                if (loading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Text("SEARCH")
+            Spacer(Modifier.width(4.dp))
+            IconButton(onClick = { collection = null; scope.launch { loadCatalog() } }, enabled = !loading) {
+                if (loading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                else Icon(Icons.Default.Search, "Buscar")
             }
-            Spacer(Modifier.width(10.dp))
+            Box {
+                IconButton(onClick = { filterMenu = true }) { Icon(Icons.Default.FilterList, "Colección") }
+                DropdownMenu(expanded = filterMenu, onDismissRequest = { filterMenu = false }) {
+                    val feeds = listOf(null to "Explorar", Tone3000Client.Collection.FAVORITES to "Favoritos", Tone3000Client.Collection.CREATED to "Mis tonos", Tone3000Client.Collection.DOWNLOADED to "Descargados")
+                    feeds.forEach { (feed, label) ->
+                        DropdownMenuItem(
+                            text = { Text(label) },
+                            leadingIcon = { if (collection == feed) Icon(Icons.Default.Check, null) },
+                            onClick = { filterMenu = false; collection = feed; scope.launch { loadCatalog(if (feed == null) query else "") } },
+                        )
+                    }
+                }
+            }
             IconButton(onClick = { session.clear(); connected = false; user = null; tones = emptyList() }) {
                 Icon(Icons.Default.Logout, "Sign out", tint = MutedText)
             }
         }
-
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 14.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            val feeds = listOf(null to "EXPLORE", Tone3000Client.Collection.FAVORITES to "FAVORITES", Tone3000Client.Collection.CREATED to "MY TONES", Tone3000Client.Collection.DOWNLOADED to "DOWNLOADED")
-            feeds.forEach { (feed, label) -> FilterChip(selected = collection == feed, onClick = { collection = feed; scope.launch { loadCatalog(if (feed == null) query else "") } }, label = { Text(label) }) }
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(when (collection) {
+                Tone3000Client.Collection.FAVORITES -> "FAVORITOS"
+                Tone3000Client.Collection.CREATED -> "MIS TONOS"
+                Tone3000Client.Collection.DOWNLOADED -> "DESCARGADOS"
+                null -> "EXPLORAR"
+            }, color = ElectricBlue, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+            Spacer(Modifier.width(10.dp))
+            Text(status, color = MutedText, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-
-        Text(status, color = MutedText, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp), maxLines = 2, overflow = TextOverflow.Ellipsis)
-        Spacer(Modifier.height(6.dp))
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(14.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 7.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(tones, key = { it.id }) { tone ->
                 ToneCard(
                     tone = tone,
