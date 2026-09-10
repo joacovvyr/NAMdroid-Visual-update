@@ -213,7 +213,7 @@ fun StageWorkbench(
     val resource = when (block.type) {
         BlockType.AMP -> R.drawable.amp
         BlockType.IR -> R.drawable.cab
-        BlockType.COMP -> R.drawable.pedal_comp
+        BlockType.COMPRESSOR -> R.drawable.pedal_comp
         BlockType.GATE -> R.drawable.pedal_gate
         BlockType.DRIVE -> R.drawable.pedal_drive
         BlockType.EQ -> R.drawable.pedal_eq

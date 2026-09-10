@@ -4,7 +4,9 @@ name: Build NAMDroid APK
 # desde la pestaña "Actions" del repo con el boton "Run workflow".
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ "**" ]
+  pull_request:
+    branches: [ "main" ]
   workflow_dispatch: {}
 
 jobs:
