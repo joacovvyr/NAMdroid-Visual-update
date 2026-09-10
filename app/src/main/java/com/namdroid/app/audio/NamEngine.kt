@@ -48,6 +48,13 @@ class NamEngine {
 
     /** 0 = Auto (Exclusive -> Shared), 1 = Exclusive, 2 = Shared. */
     fun setSharingMode(mode: Int) = nativeSetSharingMode(mode.coerceIn(0, 2))
+    fun setInputChannelMode(mode: Int) = nativeSetInputChannelMode(mode.coerceIn(0, 2))
+    fun getInputChannelCount(): Int = nativeGetInputChannelCount()
+    fun getOutputChannelCount(): Int = nativeGetOutputChannelCount()
+    fun getActualSharingMode(): Int = nativeGetActualSharingMode()
+    fun getBufferSizeFrames(): Int = nativeGetBufferSizeFrames()
+    fun getXRunCount(): Int = nativeGetXRunCount()
+    fun getCallbackLoadPercent(): Double = nativeGetCallbackLoadPercent()
 
     private external fun nativeStart(): Boolean
     private external fun nativeStop()
@@ -71,4 +78,11 @@ class NamEngine {
     private external fun nativeGetStreamSampleRate(): Int
     private external fun nativeSetAudioDeviceIds(inputDeviceId: Int, outputDeviceId: Int)
     private external fun nativeSetSharingMode(mode: Int)
+    private external fun nativeSetInputChannelMode(mode: Int)
+    private external fun nativeGetInputChannelCount(): Int
+    private external fun nativeGetOutputChannelCount(): Int
+    private external fun nativeGetActualSharingMode(): Int
+    private external fun nativeGetBufferSizeFrames(): Int
+    private external fun nativeGetXRunCount(): Int
+    private external fun nativeGetCallbackLoadPercent(): Double
 }
