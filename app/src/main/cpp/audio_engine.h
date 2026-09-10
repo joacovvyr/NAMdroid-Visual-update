@@ -153,6 +153,8 @@ private:
     std::vector<float> mInterleavedScratch; // lectura/escritura cruda multicanal
     std::vector<float> mDelayBuffer;
     std::vector<float> mReverbBuffer;
+    std::array<std::vector<float>, 4> mReverbCombs;
+    std::array<std::vector<float>, 2> mReverbAllpasses;
     std::vector<float> mChorusBuffer;
     std::vector<float> mLooperBuffer;
     // Doble buffer SPSC para que la autocorrelacion nunca corra en el callback.
@@ -173,6 +175,8 @@ private:
     std::mutex mIrMutex;
     size_t mDelayWriteIndex{0};
     size_t mReverbWriteIndex{0};
+    std::array<size_t, 4> mReverbCombIndices{};
+    std::array<size_t, 2> mReverbAllpassIndices{};
     size_t mChorusWriteIndex{0};
     size_t mLooperPosition{0};
     size_t mLooperLength{0};
@@ -181,6 +185,10 @@ private:
     size_t mIrBlockIndex{0};
     size_t mIrSpectrumIndex{0};
     float mChorusPhase{0.0f};
+    float mDrivePreviousInput{0.0f};
+    float mDriveAntiAliasState{0.0f};
+    float mDelaySmoothedSamples{17280.0f};
+    float mDelayToneState{0.0f};
     float mEqLowState{0.0f};
     float mEqHighState{0.0f};
     float mGateEnvelope{0.0f};
