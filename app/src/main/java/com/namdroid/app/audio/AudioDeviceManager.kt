@@ -3,6 +3,9 @@ package com.namdroid.app.audio
 import android.content.Context
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
+import android.media.AudioDeviceCallback
+import android.os.Handler
+import android.os.Looper
 
 data class AudioDeviceOption(
     val id: Int,
@@ -69,6 +72,19 @@ class AudioDeviceManager(context: Context) {
 
     fun labelForInput(id: Int): String = inputDevices().firstOrNull { it.id == id }?.displayName ?: "Sistema / automático"
     fun labelForOutput(id: Int): String = outputDevices().firstOrNull { it.id == id }?.displayName ?: "Sistema / automático"
+
+    fun registerDeviceCallback(onChanged: () -> Unit): AudioDeviceCallback {
+        val callback = object : AudioDeviceCallback() {
+            override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) = onChanged()
+            override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) = onChanged()
+        }
+        audioManager.registerAudioDeviceCallback(callback, Handler(Looper.getMainLooper()))
+        return callback
+    }
+
+    fun unregisterDeviceCallback(callback: AudioDeviceCallback) {
+        audioManager.unregisterAudioDeviceCallback(callback)
+    }
 
     private fun systemDefault(name: String, input: Boolean, output: Boolean) =
         AudioDeviceOption(0, name, "Android", input, output)
