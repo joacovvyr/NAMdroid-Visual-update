@@ -245,16 +245,16 @@ fun StageWorkbench(
         Column(Modifier.fillMaxWidth(faceWidth).fillMaxHeight(if (isPedal) .88f else .62f), horizontalAlignment = Alignment.CenterHorizontally) {
             if (!isPedal) Text(block.type.label.uppercase(), color = Color.White, fontSize = if (large) 13.sp else 8.sp, fontWeight = FontWeight.Black, letterSpacing = if (large) 1.sp else .5.sp, maxLines = 1)
             Spacer(Modifier.height(if (large) 18.dp else 5.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            if (isPedal || large) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                 block.type.parameters.take(2).forEach { spec ->
                     GearKnob(spec, block.parameters[spec.key] ?: spec.default, block.type.color, large, change?.let { action -> { value -> action(spec, value) } })
                 }
             }
             Spacer(Modifier.weight(1f))
             if (block.type != BlockType.IR) {
-                Canvas(Modifier.size(if (large) 13.dp else 7.dp)) { drawCircle(if (block.enabled) StageAccent else Color(0xFF303840)); if (block.enabled) drawCircle(Color.White.copy(alpha = .55f), size.minDimension * .2f) }
-                Spacer(Modifier.height(if (large) 9.dp else 3.dp))
-                Canvas(Modifier.size(if (large) 48.dp else 22.dp)) { val r = size.minDimension * .43f; drawCircle(Brush.radialGradient(listOf(Color.White, Color(0xFF89939A), Color(0xFF242B30))), r); drawCircle(Color(0xFF1D2429), r * .7f, style = Stroke(if (large) 3.dp.toPx() else 1.dp.toPx())) }
+                Canvas(Modifier.size(if (large) 9.dp else 5.dp)) { drawCircle(if (block.enabled) StageAccent else Color(0xFF303840)); if (block.enabled) drawCircle(Color.White.copy(alpha = .55f), size.minDimension * .2f) }
+                Spacer(Modifier.height(if (large) 6.dp else 2.dp))
+                Canvas(Modifier.size(if (large) 34.dp else 16.dp)) { val r = size.minDimension * .43f; drawCircle(Brush.radialGradient(listOf(Color.White, Color(0xFF89939A), Color(0xFF242B30))), r); drawCircle(Color(0xFF1D2429), r * .7f, style = Stroke(if (large) 2.dp.toPx() else 1.dp.toPx())) }
             }
         }
     }
@@ -263,17 +263,15 @@ fun StageWorkbench(
 @Composable private fun GearKnob(spec: ParameterSpec, value: Float, tint: Color, large: Boolean, change: ((Float) -> Unit)?) {
     val currentValue by rememberUpdatedState(value); val currentChange by rememberUpdatedState(change)
     val fraction = ((value - spec.range.start) / (spec.range.endInclusive - spec.range.start)).coerceIn(0f, 1f)
-    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(if (large) 44.dp else 34.dp)) {
-        Canvas(Modifier.size(if (large) 34.dp else 25.dp).then(if (change == null) Modifier else Modifier.pointerInput(spec.key) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(if (large) 32.dp else 20.dp)) {
+        Canvas(Modifier.size(if (large) 24.dp else 14.dp).then(if (change == null) Modifier else Modifier.pointerInput(spec.key) {
             detectVerticalDragGestures { event, amount -> event.consume(); currentChange?.invoke((currentValue - amount / 180.dp.toPx() * (spec.range.endInclusive - spec.range.start)).coerceIn(spec.range)) }
         })) {
             val r = size.minDimension * .38f; val angle = (135 + fraction * 270) * Math.PI / 180
-            drawArc(Color.Black.copy(alpha = .55f), 135f, 270f, false, style = Stroke(if (large) 3.dp.toPx() else 2.dp.toPx(), cap = StrokeCap.Round))
+            drawArc(Color.Black.copy(alpha = .55f), 135f, 270f, false, style = Stroke(if (large) 2.dp.toPx() else 1.dp.toPx(), cap = StrokeCap.Round))
             drawCircle(Brush.radialGradient(listOf(Color(0xFF5F6B74), Color(0xFF11161A))), r)
-            drawLine(tint, center + Offset(cos(angle).toFloat(), sin(angle).toFloat()) * (r * .48f), center + Offset(cos(angle).toFloat(), sin(angle).toFloat()) * (r * .84f), if (large) 2.dp.toPx() else 1.5.dp.toPx(), StrokeCap.Round)
+            drawLine(tint, center + Offset(cos(angle).toFloat(), sin(angle).toFloat()) * (r * .48f), center + Offset(cos(angle).toFloat(), sin(angle).toFloat()) * (r * .84f), if (large) 1.5.dp.toPx() else 1.dp.toPx(), StrokeCap.Round)
         }
-        Text(spec.label.uppercase(), color = Color.White, fontSize = if (large) 7.sp else 6.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-        if (large) Text("${"%.1f".format(value)} ${spec.unit}", color = tint, fontSize = 7.sp, maxLines = 1)
     }
 }
 
