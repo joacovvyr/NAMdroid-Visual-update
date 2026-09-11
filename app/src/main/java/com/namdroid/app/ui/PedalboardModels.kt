@@ -16,7 +16,17 @@ enum class BlockType(val label: String, val shortLabel: String, val category: St
     DRIVE("Green Drive", "DRV", "Distortion", WarmOrange, 2, listOf(
         ParameterSpec("gain", "Gain", 0f..100f, 45f, "%", 0), ParameterSpec("tone", "Tone", 0f..100f, 55f, "%", 1), ParameterSpec("level", "Level", -12f..12f, 0f, "dB", 2))),
     AMP("NAM Amplifier", "NAM", "Amplifier", ElectricBlue, 3, listOf(
-        ParameterSpec("input", "Input", -12f..12f, 0f, "dB", 0), ParameterSpec("output", "Output", -18f..12f, 0f, "dB", 1))),
+        ParameterSpec("input", "Input / Drive", -18f..18f, 0f, "dB", 0),
+        ParameterSpec("bass", "Bass", -12f..12f, 0f, "dB", 1),
+        ParameterSpec("mid", "Mid Gain", -12f..12f, 0f, "dB", 2),
+        ParameterSpec("midfreq", "Mid Frequency", 150f..4000f, 750f, "Hz", 3),
+        ParameterSpec("midq", "Mid Q", 0.3f..4f, 0.8f, "Q", 4),
+        ParameterSpec("treble", "Treble", -12f..12f, 0f, "dB", 5),
+        ParameterSpec("presence", "Presence", -12f..12f, 0f, "dB", 6),
+        ParameterSpec("resonance", "Resonance", -12f..12f, 0f, "dB", 7),
+        ParameterSpec("lowcut", "Low Cut", 20f..250f, 35f, "Hz", 8),
+        ParameterSpec("highcut", "High Cut", 3000f..20000f, 18000f, "Hz", 9),
+        ParameterSpec("output", "Output", -24f..18f, 0f, "dB", 10))),
     IR("IR Cabinet", "IR", "Cabinet", Color(0xFF4CC9F0), 7, listOf(
         ParameterSpec("level", "Level", -18f..12f, 0f, "dB", 0), ParameterSpec("lowcut", "Low Cut", 20f..300f, 70f, "Hz", 1), ParameterSpec("highcut", "High Cut", 3000f..20000f, 12000f, "Hz", 2))),
     EQ("Three Band EQ", "EQ", "Equalizer", Color(0xFFC77DFF), 4, listOf(

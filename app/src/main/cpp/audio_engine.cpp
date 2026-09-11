@@ -143,8 +143,8 @@ void AudioEngine::setEffectChain(const int *types, const bool *enabled,
             target.enabled.load() != enabled[slot];
         target.type.store(newType, std::memory_order_relaxed);
         target.enabled.store(enabled[slot], std::memory_order_relaxed);
-        for (int param = 0; param < 3; ++param) {
-            target.params[param].store(params[slot * 3 + param], std::memory_order_relaxed);
+        for (int param = 0; param < kMaxEffectParams; ++param) {
+            target.params[param].store(params[slot * kMaxEffectParams + param], std::memory_order_relaxed);
         }
     }
     for (int slot = count; slot < kMaxEffectSlots; ++slot) {
@@ -415,6 +415,8 @@ bool AudioEngine::start() {
     }
     for (auto &slot : mEffectSlots) {
         slot.drivePreviousInput = 0.0f; slot.driveAntiAliasState = 0.0f;
+        slot.ampEqState = {}; slot.ampLowCutState = 0.0f;
+        slot.ampHighCutState = 0.0f; slot.ampLowCutPrevious = 0.0f;
         slot.gateEnvelope = 0.0f; slot.eqLowState = 0.0f; slot.eqHighState = 0.0f;
         slot.delaySmoothedSamples = mSampleRate.load() * 0.36f;
         slot.delayToneState = 0.0f; slot.delayWriteIndex = 0;
@@ -603,7 +605,8 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *,
         const int effect = instance ? instance->type.load() : mEffectOrder[slotIndex].load();
         if (instance ? !instance->enabled.load() : !mEffectEnabled[effect].load()) continue;
         const auto parameter = [&](int index) {
-            return instance ? instance->params[index].load() : mEffectParams[effect][index].load();
+            return instance ? instance->params[index].load() :
+                (index < 3 ? mEffectParams[effect][index].load() : 0.0f);
         };
         float &gateEnvelope = instance ? instance->gateEnvelope : mGateEnvelope;
         float &eqLowState = instance ? instance->eqLowState : mEqLowState;
@@ -654,15 +657,67 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *,
                 mMonoResult[i] = (clipped * (0.65f + tone * 0.35f) + input * (0.35f - tone * 0.25f)) * level;
             }
         } else if (effect == 3 && !bypass) {
-            std::unique_lock<std::mutex> lock(mModelMutex, std::try_to_lock);
-            if (lock.owns_lock() && mModel) {
-                const float pre = dbToLinear(parameter(0));
-                for (int32_t i = 0; i < frames; ++i) mDspInPtrStorage[i] = mMonoResult[i] * pre;
-                NAM_SAMPLE *inPtr = mDspInPtrStorage.data();
-                NAM_SAMPLE *outPtr = mDspOutPtrStorage.data();
-                mModel->process(&inPtr, &outPtr, frames);
+            const float sampleRate = std::max(mSampleRate.load(), 1);
+            const float pre = dbToLinear(parameter(0));
+            const float lowCut = instance ? std::clamp(parameter(8), 20.0f, 250.0f) : 20.0f;
+            const float highCut = instance ? std::clamp(parameter(9), 3000.0f, 20000.0f) : 20000.0f;
+            const float hpCoefficient = std::exp(-6.2831853f * lowCut / sampleRate);
+            const float lpCoefficient = 1.0f - std::exp(-6.2831853f * highCut / sampleRate);
+            for (int32_t i = 0; i < frames; ++i) {
+                float value = mMonoResult[i] * pre;
+                if (instance) {
+                    instance->ampLowCutState = hpCoefficient *
+                        (instance->ampLowCutState + value - instance->ampLowCutPrevious);
+                    instance->ampLowCutPrevious = value;
+                    instance->ampHighCutState += lpCoefficient *
+                        (instance->ampLowCutState - instance->ampHighCutState);
+                    value = instance->ampHighCutState;
+                }
+                mDspInPtrStorage[i] = value;
+            }
+            {
+                std::unique_lock<std::mutex> lock(mModelMutex, std::try_to_lock);
+                if (lock.owns_lock() && mModel) {
+                    NAM_SAMPLE *inPtr = mDspInPtrStorage.data();
+                    NAM_SAMPLE *outPtr = mDspOutPtrStorage.data();
+                    mModel->process(&inPtr, &outPtr, frames);
+                    for (int32_t i = 0; i < frames; ++i) mMonoResult[i] = mDspOutPtrStorage[i];
+                }
+            }
+            if (instance) {
+                struct Coefficients { float b0, b1, b2, a1, a2; };
+                const auto peak = [&](float frequency, float gainDb, float q) {
+                    const float a = std::pow(10.0f, gainDb / 40.0f);
+                    const float omega = 6.2831853f * std::clamp(frequency, 20.0f, sampleRate * 0.45f) / sampleRate;
+                    const float alpha = std::sin(omega) / (2.0f * std::max(q, 0.1f));
+                    const float a0 = 1.0f + alpha / a;
+                    return Coefficients{(1.0f + alpha * a) / a0,
+                        (-2.0f * std::cos(omega)) / a0,
+                        (1.0f - alpha * a) / a0,
+                        (-2.0f * std::cos(omega)) / a0,
+                        (1.0f - alpha / a) / a0};
+                };
+                const std::array<Coefficients, 5> filters{
+                    peak(90.0f, parameter(1), 0.65f),
+                    peak(std::clamp(parameter(3), 150.0f, 4000.0f), parameter(2), std::clamp(parameter(4), 0.3f, 4.0f)),
+                    peak(3500.0f, parameter(5), 0.7f),
+                    peak(6500.0f, parameter(6), 0.8f),
+                    peak(110.0f, parameter(7), 1.2f)};
+                for (int32_t i = 0; i < frames; ++i) {
+                    float value = mMonoResult[i];
+                    for (size_t band = 0; band < filters.size(); ++band) {
+                        const auto &c = filters[band];
+                        auto &state = instance->ampEqState[band];
+                        const float output = c.b0 * value + state[0];
+                        state[0] = c.b1 * value - c.a1 * output + state[1];
+                        state[1] = c.b2 * value - c.a2 * output;
+                        value = output;
+                    }
+                    mMonoResult[i] = value * dbToLinear(parameter(10));
+                }
+            } else {
                 const float post = dbToLinear(parameter(1));
-                for (int32_t i = 0; i < frames; ++i) mMonoResult[i] = mDspOutPtrStorage[i] * post;
+                for (int32_t i = 0; i < frames; ++i) mMonoResult[i] *= post;
             }
         } else if (effect == 4) {
             const float lowGain = dbToLinear(parameter(0));

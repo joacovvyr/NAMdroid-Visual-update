@@ -18,6 +18,8 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -209,7 +211,11 @@ private fun AppNav(engine: NamEngine, oauthCallback: Uri?, onOAuthConsumed: () -
                 }
             },
         )
-        if (screen == Screen.TONE3000) Surface(Modifier.fillMaxSize()) {
+        Surface(
+            Modifier.fillMaxSize()
+                .zIndex(if (screen == Screen.TONE3000) 1f else -1f)
+                .alpha(if (screen == Screen.TONE3000) 1f else 0f)
+        ) {
         BrowseToneScreen(
             oauthCallback = oauthCallback,
             onOAuthConsumed = onOAuthConsumed,
