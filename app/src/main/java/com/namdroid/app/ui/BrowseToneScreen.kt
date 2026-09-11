@@ -51,10 +51,16 @@ fun BrowseToneScreen(
     var query by remember { mutableStateOf("") }
     var collection by remember { mutableStateOf<Tone3000Client.Collection?>(null) }
     var tones by remember { mutableStateOf<List<Tone>>(emptyList()) }
+    var searchPage by remember { mutableIntStateOf(1) }
+    var canLoadMore by remember { mutableStateOf(true) }
+    var showFilters by remember { mutableStateOf(false) }
+    var sortMode by remember { mutableStateOf("RELEVANCE") }
+    var gearFilter by remember { mutableStateOf<String?>(null) }
+    var creatorFilter by remember { mutableStateOf("") }
+    var minimumModels by remember { mutableFloatStateOf(0f) }
     var expandedTone by remember { mutableStateOf<Long?>(null) }
     var models by remember { mutableStateOf<List<ToneModel>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
-    var filterMenu by remember { mutableStateOf(false) }
     var downloadingModelId by remember { mutableStateOf<Long?>(null) }
     var exportPath by rememberSaveable { mutableStateOf<String?>(null) }
     val saveNam = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
@@ -79,7 +85,26 @@ fun BrowseToneScreen(
         return client.downloadModel(token, model, File(context.filesDir, "nam_models/t3k_${model.id}_$safeName.nam"))
     }
 
-    suspend fun loadCatalog(search: String = query) {
+    val gearOptions by remember {
+        derivedStateOf { tones.mapNotNull { it.gear?.trim()?.takeIf(String::isNotBlank) }.distinct().sortedBy(String::lowercase) }
+    }
+    val visibleTones by remember {
+        derivedStateOf {
+            val filtered = tones.filter { tone ->
+                (gearFilter == null || tone.gear.equals(gearFilter, ignoreCase = true)) &&
+                    (creatorFilter.isBlank() || tone.creator.orEmpty().contains(creatorFilter.trim(), ignoreCase = true)) &&
+                    tone.modelsCount >= minimumModels.toInt()
+            }
+            when (sortMode) {
+                "DOWNLOADS" -> filtered.sortedByDescending { it.downloadsCount }
+                "MODELS" -> filtered.sortedByDescending { it.modelsCount }
+                "A_Z" -> filtered.sortedBy { it.title.lowercase() }
+                else -> filtered
+            }
+        }
+    }
+
+    suspend fun loadCatalog(search: String = query, append: Boolean = false) {
         val token = session.validAccessToken()
         if (token == null) {
             connected = false
@@ -89,8 +114,17 @@ fun BrowseToneScreen(
         loading = true
         try {
             if (user == null) user = client.getUser(token)
-            tones = collection?.let { client.listTones(token, it) } ?: client.searchTones(token, search.trim())
-            status = if (tones.isEmpty()) "No tones found" else "${tones.size} NAM A2 tones"
+            if (collection != null) {
+                tones = client.listTones(token, collection!!)
+                searchPage = 1; canLoadMore = false
+            } else {
+                val requestedPage = if (append) searchPage + 1 else 1
+                val received = client.searchTones(token, search.trim(), requestedPage, 50)
+                tones = if (append) (tones + received).distinctBy { it.id } else received
+                searchPage = requestedPage
+                canLoadMore = received.size == 50
+            }
+            status = if (tones.isEmpty()) "No tones found" else "${tones.size} tonos cargados • ${visibleTones.size} visibles"
         } catch (e: Exception) {
             status = e.message ?: "TONE3000 request failed"
         } finally { loading = false }
@@ -129,13 +163,13 @@ fun BrowseToneScreen(
 
     Column(Modifier.fillMaxSize().background(Carbon).safeDrawingPadding()) {
         Row(
-            Modifier.fillMaxWidth().height(54.dp).background(Panel).padding(horizontal = 10.dp),
+            Modifier.fillMaxWidth().height(64.dp).background(Panel).padding(horizontal = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") }
             Column {
-                Text("TONE3000", fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
-                Text("NAM A2 LIBRARY", color = MutedText, style = MaterialTheme.typography.labelSmall)
+                Text("TONE3000", fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleLarge)
+                Text("NAM A2 CLOUD LIBRARY", color = MutedText, style = MaterialTheme.typography.labelSmall)
             }
             Spacer(Modifier.weight(1f))
             user?.let {
@@ -167,7 +201,7 @@ fun BrowseToneScreen(
             return@Column
         }
 
-        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
@@ -176,42 +210,31 @@ fun BrowseToneScreen(
                 leadingIcon = { Icon(Icons.Default.Search, null) },
                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(onSearch = { collection = null; scope.launch { loadCatalog() } }),
-                modifier = Modifier.weight(1f).height(46.dp),
+                modifier = Modifier.weight(1f),
             )
-            Spacer(Modifier.width(4.dp))
-            IconButton(onClick = { collection = null; scope.launch { loadCatalog() } }, enabled = !loading) {
-                if (loading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                else Icon(Icons.Default.Search, "Buscar")
+            Spacer(Modifier.width(10.dp))
+            OutlinedButton(onClick = { showFilters = true }) {
+                Icon(Icons.Default.Tune, null); Spacer(Modifier.width(5.dp)); Text("FILTROS")
             }
-            Box {
-                IconButton(onClick = { filterMenu = true }) { Icon(Icons.Default.FilterList, "Colección") }
-                DropdownMenu(expanded = filterMenu, onDismissRequest = { filterMenu = false }) {
-                    val feeds = listOf(null to "Explorar", Tone3000Client.Collection.FAVORITES to "Favoritos", Tone3000Client.Collection.CREATED to "Mis tonos", Tone3000Client.Collection.DOWNLOADED to "Descargados")
-                    feeds.forEach { (feed, label) ->
-                        DropdownMenuItem(
-                            text = { Text(label) },
-                            leadingIcon = { if (collection == feed) Icon(Icons.Default.Check, null) },
-                            onClick = { filterMenu = false; collection = feed; scope.launch { loadCatalog(if (feed == null) query else "") } },
-                        )
-                    }
-                }
+            Spacer(Modifier.width(10.dp))
+            Button(onClick = { collection = null; scope.launch { loadCatalog() } }, enabled = !loading) {
+                if (loading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Text("SEARCH")
             }
+            Spacer(Modifier.width(10.dp))
             IconButton(onClick = { session.clear(); connected = false; user = null; tones = emptyList() }) {
                 Icon(Icons.Default.Logout, "Sign out", tint = MutedText)
             }
         }
-        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(when (collection) {
-                Tone3000Client.Collection.FAVORITES -> "FAVORITOS"
-                Tone3000Client.Collection.CREATED -> "MIS TONOS"
-                Tone3000Client.Collection.DOWNLOADED -> "DESCARGADOS"
-                null -> "EXPLORAR"
-            }, color = ElectricBlue, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
-            Spacer(Modifier.width(10.dp))
-            Text(status, color = MutedText, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 14.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            val feeds = listOf(null to "EXPLORE", Tone3000Client.Collection.FAVORITES to "FAVORITES", Tone3000Client.Collection.CREATED to "MY TONES", Tone3000Client.Collection.DOWNLOADED to "DOWNLOADED")
+            feeds.forEach { (feed, label) -> FilterChip(selected = collection == feed, onClick = { collection = feed; scope.launch { loadCatalog(if (feed == null) query else "") } }, label = { Text(label) }) }
         }
-        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 7.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(tones, key = { it.id }) { tone ->
+
+        Text("$status  •  Mostrando ${visibleTones.size}", color = MutedText, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp), maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Spacer(Modifier.height(6.dp))
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(14.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+            items(visibleTones, key = { it.id }) { tone ->
                 ToneCard(
                     tone = tone,
                     expanded = expandedTone == tone.id,
@@ -263,6 +286,49 @@ fun BrowseToneScreen(
                         }
                     },
                 )
+            }
+            if (collection == null && canLoadMore) item {
+                OutlinedButton(
+                    onClick = { scope.launch { loadCatalog(append = true) } },
+                    enabled = !loading,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
+                ) {
+                    if (loading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    else { Icon(Icons.Default.ExpandMore, null); Spacer(Modifier.width(6.dp)); Text("CARGAR 50 MÁS") }
+                }
+            }
+        }
+    }
+
+    if (showFilters) ModalBottomSheet(onDismissRequest = { showFilters = false }) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
+            Text("FILTRAR Y ORDENAR", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+            Spacer(Modifier.height(14.dp))
+            Text("ORDEN", color = MutedText, style = MaterialTheme.typography.labelMedium)
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                listOf("RELEVANCE" to "RELEVANCIA", "DOWNLOADS" to "MÁS POPULARES", "MODELS" to "MÁS MODELOS", "A_Z" to "A–Z").forEach { (value, label) ->
+                    FilterChip(selected = sortMode == value, onClick = { sortMode = value }, label = { Text(label) })
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            OutlinedTextField(
+                value = creatorFilter,
+                onValueChange = { creatorFilter = it },
+                modifier = Modifier.fillMaxWidth(), singleLine = true,
+                label = { Text("CREADOR") }, placeholder = { Text("Nombre o usuario") },
+            )
+            Spacer(Modifier.height(10.dp))
+            Text("TIPO DE EQUIPO", color = MutedText, style = MaterialTheme.typography.labelMedium)
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                FilterChip(selected = gearFilter == null, onClick = { gearFilter = null }, label = { Text("TODOS") })
+                gearOptions.forEach { gear -> FilterChip(selected = gearFilter == gear, onClick = { gearFilter = gear }, label = { Text(gear.uppercase()) }) }
+            }
+            Spacer(Modifier.height(10.dp))
+            Text("MÍNIMO DE VARIANTES: ${minimumModels.toInt()}", color = MutedText, style = MaterialTheme.typography.labelMedium)
+            Slider(value = minimumModels, onValueChange = { minimumModels = it }, valueRange = 0f..20f, steps = 19)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton(onClick = { sortMode = "RELEVANCE"; gearFilter = null; creatorFilter = ""; minimumModels = 0f }, modifier = Modifier.weight(1f)) { Text("LIMPIAR") }
+                Button(onClick = { showFilters = false }, modifier = Modifier.weight(1f)) { Text("VER ${visibleTones.size} TONOS") }
             }
         }
     }
