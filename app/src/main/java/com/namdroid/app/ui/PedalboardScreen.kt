@@ -95,10 +95,10 @@ fun PedalboardScreen(
         val effects = blocks.filter { it.type.engineId != null }.take(16)
         val types = effects.map { it.type.engineId!! }.toIntArray()
         val enabled = BooleanArray(effects.size) { effects[it].enabled }
-        val params = FloatArray(effects.size * 3)
+        val params = FloatArray(effects.size * 11)
         effects.forEachIndexed { index, block ->
             block.type.parameters.forEach { spec ->
-                params[index * 3 + spec.engineParam] = block.parameters[spec.key] ?: spec.default
+                params[index * 11 + spec.engineParam] = block.parameters[spec.key] ?: spec.default
             }
         }
         engine.setEffectChain(types, enabled, params)
