@@ -417,7 +417,9 @@ bool AudioEngine::start() {
         slot.drivePreviousInput = 0.0f; slot.driveAntiAliasState = 0.0f;
         slot.ampEqState = {}; slot.ampLowCutState = 0.0f;
         slot.ampHighCutState = 0.0f; slot.ampLowCutPrevious = 0.0f;
-        slot.gateEnvelope = 0.0f; slot.eqLowState = 0.0f; slot.eqHighState = 0.0f;
+        slot.gateEnvelope = 0.0f; slot.compressorEnvelope = 0.0f;
+        slot.compressorGain = 1.0f; slot.eqLowState = 0.0f; slot.eqHighState = 0.0f;
+        slot.pedalEqState = {};
         slot.delaySmoothedSamples = mSampleRate.load() * 0.36f;
         slot.delayToneState = 0.0f; slot.delayWriteIndex = 0;
         slot.delayBuffer.assign(std::max(mSampleRate.load() * 2, 1), 0.0f);
@@ -430,7 +432,7 @@ bool AudioEngine::start() {
             slot.reverbAllpassIndices[i] = 0;
         }
         slot.chorusBuffer.assign(std::max(mSampleRate.load() / 10, 1), 0.0f);
-        slot.chorusWriteIndex = 0; slot.chorusPhase = 0.0f;
+        slot.chorusWriteIndex = 0; slot.chorusPhase = 0.0f; slot.chorusToneState = 0.0f;
     }
     mChorusBuffer.assign(std::max(mSampleRate.load() / 10, 1), 0.0f);
     mLooperBuffer.assign(std::max(mSampleRate.load() * 60, 1), 0.0f);
@@ -441,11 +443,16 @@ bool AudioEngine::start() {
     mLooperLength = 0;
     mTunerWriteIndex = 0;
     mChorusPhase = 0.0f;
+    mChorusToneState = 0.0f;
     mDrivePreviousInput = 0.0f;
     mDriveAntiAliasState = 0.0f;
     mDelaySmoothedSamples = mSampleRate.load() * 0.36f;
     mDelayToneState = 0.0f;
     mEqLowState = 0.0f;
+    mEqHighState = 0.0f;
+    mCompressorEnvelope = 0.0f;
+    mCompressorGain = 1.0f;
+    mPedalEqState = {};
     mSmoothedInputGain = mInputGainLinear.load();
     mSmoothedOutputGain = mOutputGainLinear.load();
 
@@ -609,8 +616,11 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *,
                 (index < 3 ? mEffectParams[effect][index].load() : 0.0f);
         };
         float &gateEnvelope = instance ? instance->gateEnvelope : mGateEnvelope;
+        float &compressorEnvelope = instance ? instance->compressorEnvelope : mCompressorEnvelope;
+        float &compressorGain = instance ? instance->compressorGain : mCompressorGain;
         float &eqLowState = instance ? instance->eqLowState : mEqLowState;
         float &eqHighState = instance ? instance->eqHighState : mEqHighState;
+        auto &pedalEqState = instance ? instance->pedalEqState : mPedalEqState;
         float &drivePreviousInput = instance ? instance->drivePreviousInput : mDrivePreviousInput;
         float &driveAntiAliasState = instance ? instance->driveAntiAliasState : mDriveAntiAliasState;
         auto &delayBuffer = instance ? instance->delayBuffer : mDelayBuffer;
@@ -624,6 +634,7 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *,
         auto &chorusBuffer = instance ? instance->chorusBuffer : mChorusBuffer;
         size_t &chorusWriteIndex = instance ? instance->chorusWriteIndex : mChorusWriteIndex;
         float &chorusPhase = instance ? instance->chorusPhase : mChorusPhase;
+        float &chorusToneState = instance ? instance->chorusToneState : mChorusToneState;
 
         if (effect == 1) {
             const float threshold = dbToLinear(parameter(0));
@@ -720,14 +731,42 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *,
                 for (int32_t i = 0; i < frames; ++i) mMonoResult[i] *= post;
             }
         } else if (effect == 4) {
-            const float lowGain = dbToLinear(parameter(0));
-            const float midGain = dbToLinear(parameter(1));
-            const float highGain = dbToLinear(parameter(2));
+            struct Coefficients { float b0, b1, b2, a1, a2; };
+            const float sampleRate = std::max(mSampleRate.load(), 1);
+            const auto peak = [&](float frequency, float gainDb, float q) {
+                const float a = std::pow(10.0f, gainDb / 40.0f);
+                const float omega = 6.2831853f * std::clamp(frequency, 20.0f, sampleRate * 0.45f) / sampleRate;
+                const float alpha = std::sin(omega) / (2.0f * std::max(q, 0.1f));
+                const float a0 = 1.0f + alpha / a;
+                return Coefficients{(1.0f + alpha * a) / a0, -2.0f * std::cos(omega) / a0,
+                    (1.0f - alpha * a) / a0, -2.0f * std::cos(omega) / a0,
+                    (1.0f - alpha / a) / a0};
+            };
+            const auto cut = [&](float frequency, bool highPass) {
+                const float omega = 6.2831853f * std::clamp(frequency, 20.0f, sampleRate * 0.45f) / sampleRate;
+                const float cosine = std::cos(omega), alpha = std::sin(omega) / 1.41421356f;
+                const float a0 = 1.0f + alpha;
+                const float b0 = highPass ? (1.0f + cosine) * 0.5f : (1.0f - cosine) * 0.5f;
+                const float b1 = highPass ? -(1.0f + cosine) : 1.0f - cosine;
+                return Coefficients{b0 / a0, b1 / a0, b0 / a0,
+                    -2.0f * cosine / a0, (1.0f - alpha) / a0};
+            };
+            const std::array<Coefficients, 5> filters{
+                cut(parameter(0), true), peak(parameter(2), parameter(1), 0.7f),
+                peak(parameter(4), parameter(3), parameter(5)),
+                peak(parameter(7), parameter(6), 0.7f), cut(parameter(8), false)};
+            const float output = dbToLinear(parameter(9));
             for (int32_t i = 0; i < frames; ++i) {
-                eqLowState += 0.025f * (mMonoResult[i] - eqLowState);
-                eqHighState += 0.22f * (mMonoResult[i] - eqHighState);
-                const float low = eqLowState, high = mMonoResult[i] - eqHighState, mid = mMonoResult[i] - low - high;
-                mMonoResult[i] = low * lowGain + mid * midGain + high * highGain;
+                float value = mMonoResult[i];
+                for (size_t band = 0; band < filters.size(); ++band) {
+                    const auto &c = filters[band];
+                    auto &state = pedalEqState[band];
+                    const float filtered = c.b0 * value + state[0];
+                    state[0] = c.b1 * value - c.a1 * filtered + state[1];
+                    state[1] = c.b2 * value - c.a2 * filtered;
+                    value = filtered;
+                }
+                mMonoResult[i] = value * output;
             }
         } else if (effect == 5 && !delayBuffer.empty()) {
             const float timeMs = std::clamp(parameter(0), 40.0f, 1500.0f);
@@ -796,11 +835,64 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *,
                 }
             }
         } else if (effect == 8) {
-            const float thresholdDb = parameter(0), ratio = std::max(parameter(1), 1.0f), makeup = dbToLinear(parameter(2));
-            for (int32_t i = 0; i < frames; ++i) { const float x = mMonoResult[i]; const float db = 20.0f * std::log10(std::max(std::abs(x), 1e-6f)); const float reduction = db > thresholdDb ? (thresholdDb + (db - thresholdDb) / ratio) - db : 0.0f; mMonoResult[i] = x * dbToLinear(reduction) * makeup; }
+            const float thresholdDb = parameter(0), ratio = std::max(parameter(1), 1.0f);
+            const float attack = std::clamp(parameter(2), 0.1f, 100.0f);
+            const float release = std::clamp(parameter(3), 20.0f, 1000.0f);
+            const float knee = std::clamp(parameter(4), 0.0f, 18.0f);
+            const float makeup = dbToLinear(parameter(5));
+            const float mix = std::clamp(parameter(6) / 100.0f, 0.0f, 1.0f);
+            const float attackCoeff = std::exp(-1.0f / (0.001f * attack * mSampleRate.load()));
+            const float releaseCoeff = std::exp(-1.0f / (0.001f * release * mSampleRate.load()));
+            for (int32_t i = 0; i < frames; ++i) {
+                const float dry = mMonoResult[i];
+                const float detected = std::abs(dry);
+                const float detectorCoeff = detected > compressorEnvelope ? attackCoeff : releaseCoeff;
+                compressorEnvelope = detectorCoeff * compressorEnvelope + (1.0f - detectorCoeff) * detected;
+                const float levelDb = 20.0f * std::log10(std::max(compressorEnvelope, 1e-6f));
+                const float over = levelDb - thresholdDb;
+                float reductionDb = 0.0f;
+                if (knee > 0.0f && over > -knee * 0.5f && over < knee * 0.5f) {
+                    const float kneeInput = over + knee * 0.5f;
+                    reductionDb = (1.0f / ratio - 1.0f) * kneeInput * kneeInput / (2.0f * knee);
+                } else if (over >= knee * 0.5f) {
+                    reductionDb = (1.0f / ratio - 1.0f) * over;
+                }
+                const float targetGain = dbToLinear(reductionDb);
+                const float gainCoeff = targetGain < compressorGain ? attackCoeff : releaseCoeff;
+                compressorGain = gainCoeff * compressorGain + (1.0f - gainCoeff) * targetGain;
+                const float wet = dry * compressorGain * makeup;
+                mMonoResult[i] = dry * (1.0f - mix) + wet * mix;
+            }
         } else if (effect == 9 && !chorusBuffer.empty()) {
-            const float rate = std::clamp(parameter(0), 0.05f, 8.0f), depth = std::clamp(parameter(1) / 100.0f, 0.0f, 1.0f), mix = std::clamp(parameter(2) / 100.0f, 0.0f, 1.0f);
-            for (int32_t i = 0; i < frames; ++i) { const float lfo = 0.5f + 0.5f * std::sin(chorusPhase); const size_t delay = static_cast<size_t>((0.006f + lfo * 0.018f * depth) * mSampleRate.load()); const size_t read = (chorusWriteIndex + chorusBuffer.size() - std::min(delay, chorusBuffer.size() - 1)) % chorusBuffer.size(); const float dry = mMonoResult[i], wet = chorusBuffer[read]; chorusBuffer[chorusWriteIndex] = dry; mMonoResult[i] = dry * (1.0f - mix) + wet * mix; chorusWriteIndex = (chorusWriteIndex + 1) % chorusBuffer.size(); chorusPhase += 6.2831853f * rate / mSampleRate.load(); if (chorusPhase > 6.2831853f) chorusPhase -= 6.2831853f; }
+            const float rate = std::clamp(parameter(0), 0.05f, 8.0f);
+            const float depth = std::clamp(parameter(1) / 100.0f, 0.0f, 1.0f);
+            const float mix = std::clamp(parameter(2) / 100.0f, 0.0f, 1.0f);
+            const float tone = std::clamp(parameter(3) / 100.0f, 0.0f, 1.0f);
+            const int voices = std::clamp(static_cast<int>(std::round(parameter(4))), 1, 4);
+            const float level = dbToLinear(parameter(5));
+            const float toneHz = 900.0f + tone * 10500.0f;
+            const float toneCoeff = 1.0f - std::exp(-6.2831853f * toneHz / mSampleRate.load());
+            for (int32_t i = 0; i < frames; ++i) {
+                const float dry = mMonoResult[i];
+                chorusBuffer[chorusWriteIndex] = dry;
+                float wet = 0.0f;
+                for (int voice = 0; voice < voices; ++voice) {
+                    const float phase = chorusPhase + 6.2831853f * static_cast<float>(voice) / voices;
+                    const float lfo = 0.5f + 0.5f * std::sin(phase);
+                    const float delaySamples = (0.006f + lfo * 0.018f * depth) * mSampleRate.load();
+                    const size_t whole = std::min(static_cast<size_t>(delaySamples), chorusBuffer.size() - 2);
+                    const float fraction = delaySamples - static_cast<float>(whole);
+                    const size_t readA = (chorusWriteIndex + chorusBuffer.size() - whole) % chorusBuffer.size();
+                    const size_t readB = (readA + chorusBuffer.size() - 1) % chorusBuffer.size();
+                    wet += chorusBuffer[readA] * (1.0f - fraction) + chorusBuffer[readB] * fraction;
+                }
+                wet /= static_cast<float>(voices);
+                chorusToneState += toneCoeff * (wet - chorusToneState);
+                mMonoResult[i] = (dry * (1.0f - mix) + chorusToneState * mix) * level;
+                chorusWriteIndex = (chorusWriteIndex + 1) % chorusBuffer.size();
+                chorusPhase += 6.2831853f * rate / mSampleRate.load();
+                if (chorusPhase > 6.2831853f) chorusPhase -= 6.2831853f;
+            }
         }
     }
     for (int32_t i = 0; i < frames; ++i) {
