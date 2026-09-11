@@ -86,14 +86,14 @@ Java_com_namdroid_app_audio_NamEngine_nativeSetEffectChain(
     if (!gEngine || !types || !enabled || !params) return;
     const jsize count = env->GetArrayLength(types);
     if (count < 0 || count > 16 || env->GetArrayLength(enabled) != count ||
-        env->GetArrayLength(params) != count * 3) return;
+        env->GetArrayLength(params) != count * 11) return;
     std::array<jint, 16> typeValues{};
     std::array<jboolean, 16> enabledValues{};
-    std::array<jfloat, 48> paramValues{};
+    std::array<jfloat, 176> paramValues{};
     std::array<bool, 16> enabledBools{};
     env->GetIntArrayRegion(types, 0, count, typeValues.data());
     env->GetBooleanArrayRegion(enabled, 0, count, enabledValues.data());
-    env->GetFloatArrayRegion(params, 0, count * 3, paramValues.data());
+    env->GetFloatArrayRegion(params, 0, count * 11, paramValues.data());
     for (int i = 0; i < count; ++i) enabledBools[i] = enabledValues[i] == JNI_TRUE;
     gEngine->setEffectChain(reinterpret_cast<int *>(typeValues.data()),
                             enabledBools.data(), paramValues.data(), count);
