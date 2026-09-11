@@ -105,14 +105,14 @@ void AudioEngine::analyseTunerBuffer(
 }
 
 void AudioEngine::setEffectEnabled(int effectId, bool enabled) {
-    if (effectId >= 1 && effectId <= 9) {
+    if (effectId >= 1 && effectId <= 13) {
         const bool changed = mEffectEnabled[effectId].exchange(enabled) != enabled;
         if (changed) requestCrossfade();
     }
 }
 
 void AudioEngine::setEffectAmount(int effectId, float amount) {
-    if (effectId >= 1 && effectId <= 9) {
+    if (effectId >= 1 && effectId <= 13) {
         mEffectAmount[effectId].store(std::clamp(amount, 0.0f, 1.0f));
     }
 }
@@ -129,7 +129,7 @@ void AudioEngine::setEffectOrder(const int *order, int count) {
 }
 
 void AudioEngine::setEffectParam(int effectId, int param, float value) {
-    if (effectId >= 1 && effectId <= 9 && param >= 0 && param < 3) mEffectParams[effectId][param].store(value);
+    if (effectId >= 1 && effectId <= 13 && param >= 0 && param < 3) mEffectParams[effectId][param].store(value);
 }
 
 void AudioEngine::setEffectChain(const int *types, const bool *enabled,
@@ -138,7 +138,7 @@ void AudioEngine::setEffectChain(const int *types, const bool *enabled,
     bool structuralChange = mEffectSlotCount.load(std::memory_order_acquire) != count;
     for (int slot = 0; slot < count; ++slot) {
         auto &target = mEffectSlots[slot];
-        const int newType = std::clamp(types[slot], 1, 9);
+        const int newType = std::clamp(types[slot], 1, 13);
         structuralChange = structuralChange || target.type.load() != newType ||
             target.enabled.load() != enabled[slot];
         target.type.store(newType, std::memory_order_relaxed);
@@ -438,8 +438,12 @@ bool AudioEngine::start() {
         }
         slot.chorusBuffer.assign(std::max(mSampleRate.load() / 10, 1), 0.0f);
         slot.chorusWriteIndex = 0; slot.chorusPhase = 0.0f; slot.chorusToneState = 0.0f;
+        slot.wahState = {}; slot.autoWahEnvelope = 0.0f; slot.tremoloPhase = 0.0f;
+        slot.pitchBuffer.assign(std::max(mSampleRate.load() / 5, 1), 0.0f);
+        slot.pitchWriteIndex = 0; slot.pitchPhase = 0.0f; slot.pitchToneState = 0.0f;
     }
     mChorusBuffer.assign(std::max(mSampleRate.load() / 10, 1), 0.0f);
+    mPitchBuffer.assign(std::max(mSampleRate.load() / 5, 1), 0.0f);
     mLooperBuffer.assign(std::max(mSampleRate.load() * 60, 1), 0.0f);
     mDelayWriteIndex = 0;
     mReverbWriteIndex = 0;
@@ -449,6 +453,8 @@ bool AudioEngine::start() {
     mTunerWriteIndex = 0;
     mChorusPhase = 0.0f;
     mChorusToneState = 0.0f;
+    mWahState = {}; mAutoWahEnvelope = 0.0f; mTremoloPhase = 0.0f;
+    mPitchWriteIndex = 0; mPitchPhase = 0.0f; mPitchToneState = 0.0f;
     mDrivePreviousInput = 0.0f;
     mDriveAntiAliasState = 0.0f;
     mDriveLowCutState = 0.0f;
@@ -690,6 +696,13 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *,
         size_t &chorusWriteIndex = instance ? instance->chorusWriteIndex : mChorusWriteIndex;
         float &chorusPhase = instance ? instance->chorusPhase : mChorusPhase;
         float &chorusToneState = instance ? instance->chorusToneState : mChorusToneState;
+        auto &wahState = instance ? instance->wahState : mWahState;
+        float &autoWahEnvelope = instance ? instance->autoWahEnvelope : mAutoWahEnvelope;
+        float &tremoloPhase = instance ? instance->tremoloPhase : mTremoloPhase;
+        auto &pitchBuffer = instance ? instance->pitchBuffer : mPitchBuffer;
+        size_t &pitchWriteIndex = instance ? instance->pitchWriteIndex : mPitchWriteIndex;
+        float &pitchPhase = instance ? instance->pitchPhase : mPitchPhase;
+        float &pitchToneState = instance ? instance->pitchToneState : mPitchToneState;
 
         if (effect == 1) {
             const float threshold = dbToLinear(parameter(0));
@@ -1013,6 +1026,97 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *,
                 chorusWriteIndex = (chorusWriteIndex + 1) % chorusBuffer.size();
                 chorusPhase += 6.2831853f * rate / mSampleRate.load();
                 if (chorusPhase > 6.2831853f) chorusPhase -= 6.2831853f;
+            }
+        } else if (effect == 10 || effect == 11) {
+            const float sampleRate = std::max(mSampleRate.load(), 1);
+            const float minFrequency = std::clamp(parameter(effect == 10 ? 1 : 3), 80.0f, 2000.0f);
+            const float maxFrequency = std::max(minFrequency + 50.0f,
+                std::clamp(parameter(effect == 10 ? 2 : 4), 400.0f, sampleRate * 0.42f));
+            const float q = std::clamp(parameter(effect == 10 ? 3 : 5), 0.4f, 10.0f);
+            const float mix = std::clamp(parameter(effect == 10 ? 4 : 7) / 100.0f, 0.0f, 1.0f);
+            const float level = dbToLinear(parameter(effect == 10 ? 5 : 8));
+            const float sensitivity = effect == 11 ? dbToLinear(parameter(0)) : 1.0f;
+            const float attackCoeff = effect == 11 ? std::exp(-1.0f /
+                (0.001f * std::clamp(parameter(1), 0.5f, 100.0f) * sampleRate)) : 0.0f;
+            const float releaseCoeff = effect == 11 ? std::exp(-1.0f /
+                (0.001f * std::clamp(parameter(2), 20.0f, 1200.0f) * sampleRate)) : 0.0f;
+            const float direction = effect == 11 ? std::clamp(parameter(6) / 100.0f, -1.0f, 1.0f) : 1.0f;
+            for (int32_t i = 0; i < frames; ++i) {
+                const float dry = mMonoResult[i];
+                float position = std::clamp(parameter(0) / 100.0f, 0.0f, 1.0f);
+                if (effect == 11) {
+                    const float detected = std::abs(dry) * sensitivity;
+                    const float coefficient = detected > autoWahEnvelope ? attackCoeff : releaseCoeff;
+                    autoWahEnvelope = coefficient * autoWahEnvelope + (1.0f - coefficient) * detected;
+                    const float envelopePosition = std::clamp(autoWahEnvelope * 4.0f, 0.0f, 1.0f);
+                    position = direction >= 0.0f ? envelopePosition : 1.0f - envelopePosition;
+                }
+                // Barrido exponencial: musicalmente uniforme entre graves y agudos.
+                const float frequency = minFrequency * std::pow(maxFrequency / minFrequency, position);
+                const float omega = 6.2831853f * frequency / sampleRate;
+                const float alpha = std::sin(omega) / (2.0f * q);
+                const float a0 = 1.0f + alpha;
+                const float b0 = alpha / a0, b2 = -alpha / a0;
+                const float a1 = -2.0f * std::cos(omega) / a0;
+                const float a2 = (1.0f - alpha) / a0;
+                const float filtered = b0 * dry + wahState[0];
+                wahState[0] = -a1 * filtered + wahState[1];
+                wahState[1] = b2 * dry - a2 * filtered;
+                mMonoResult[i] = (dry * (1.0f - mix) + filtered * mix * (1.0f + q * 0.12f)) * level;
+            }
+        } else if (effect == 12) {
+            const float rate = std::clamp(parameter(0), 0.1f, 20.0f);
+            const float depth = std::clamp(parameter(1) / 100.0f, 0.0f, 1.0f);
+            const float shape = std::clamp(parameter(2) / 100.0f, 0.0f, 1.0f);
+            const float symmetry = std::clamp(parameter(3) / 100.0f, 0.1f, 0.9f);
+            const float phaseOffset = std::clamp(parameter(4), 0.0f, 360.0f) / 360.0f;
+            const float level = dbToLinear(parameter(5));
+            for (int32_t i = 0; i < frames; ++i) {
+                float phase = std::fmod(tremoloPhase / 6.2831853f + phaseOffset, 1.0f);
+                const float warped = phase < symmetry ? phase * 0.5f / symmetry :
+                    0.5f + (phase - symmetry) * 0.5f / (1.0f - symmetry);
+                const float sine = 0.5f + 0.5f * std::sin(6.2831853f * warped);
+                const float square = sine >= 0.5f ? 1.0f : 0.0f;
+                const float lfo = sine * (1.0f - shape) + square * shape;
+                mMonoResult[i] *= ((1.0f - depth) + lfo * depth) * level;
+                tremoloPhase += 6.2831853f * rate / mSampleRate.load();
+                if (tremoloPhase >= 6.2831853f) tremoloPhase -= 6.2831853f;
+            }
+        } else if (effect == 13 && pitchBuffer.size() > 4) {
+            const float semitones = std::clamp(parameter(0) + parameter(1) / 100.0f, -12.0f, 12.0f);
+            if (std::abs(semitones) < 0.001f) continue;
+            const float ratio = std::pow(2.0f, semitones / 12.0f);
+            const float mix = std::clamp(parameter(2) / 100.0f, 0.0f, 1.0f);
+            const float window = std::clamp(parameter(3) * 0.001f * mSampleRate.load(),
+                128.0f, static_cast<float>(pitchBuffer.size() - 2));
+            const float tone = std::clamp(parameter(4) / 100.0f, 0.0f, 1.0f);
+            const float level = dbToLinear(parameter(5));
+            const float phaseIncrement = (1.0f - ratio) / window;
+            const float toneHz = 1200.0f + tone * 12500.0f;
+            const float toneCoeff = 1.0f - std::exp(-6.2831853f * toneHz / mSampleRate.load());
+            const auto grain = [&](float phase) {
+                phase -= std::floor(phase);
+                const float delay = 1.0f + phase * window;
+                const size_t whole = static_cast<size_t>(delay);
+                const float fraction = delay - static_cast<float>(whole);
+                const size_t a = (pitchWriteIndex + pitchBuffer.size() - whole) % pitchBuffer.size();
+                const size_t b = (a + pitchBuffer.size() - 1) % pitchBuffer.size();
+                const float sample = pitchBuffer[a] * (1.0f - fraction) + pitchBuffer[b] * fraction;
+                const float envelope = 0.5f - 0.5f * std::cos(6.2831853f * phase);
+                return std::array<float, 2>{sample, envelope};
+            };
+            for (int32_t i = 0; i < frames; ++i) {
+                const float dry = mMonoResult[i];
+                pitchBuffer[pitchWriteIndex] = dry;
+                const auto first = grain(pitchPhase);
+                const auto second = grain(pitchPhase + 0.5f);
+                const float weight = std::max(first[1] + second[1], 1e-4f);
+                const float shifted = (first[0] * first[1] + second[0] * second[1]) / weight;
+                pitchToneState += toneCoeff * (shifted - pitchToneState);
+                mMonoResult[i] = (dry * (1.0f - mix) + pitchToneState * mix) * level;
+                pitchWriteIndex = (pitchWriteIndex + 1) % pitchBuffer.size();
+                pitchPhase += phaseIncrement;
+                pitchPhase -= std::floor(pitchPhase);
             }
         }
     }
