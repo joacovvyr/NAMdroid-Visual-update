@@ -53,8 +53,18 @@ enum class BlockType(val label: String, val shortLabel: String, val category: St
         ParameterSpec("tone", "Tone", 0f..100f, 60f, "%", 3),
         ParameterSpec("voices", "Voices", 1f..4f, 3f, "", 4),
         ParameterSpec("level", "Level", -12f..12f, 0f, "dB", 5))),
-    DELAY("Digital Delay", "DLY", "Delay", Color(0xFF40C9C6), 5, listOf(
-        ParameterSpec("time", "Time", 40f..1500f, 360f, "ms", 0), ParameterSpec("feedback", "Feedback", 0f..92f, 38f, "%", 1), ParameterSpec("mix", "Mix", 0f..100f, 28f, "%", 2))),
+    DELAY("Layer Delay", "DLY", "Delay", Color(0xFF40C9C6), 5, listOf(
+        ParameterSpec("time", "Quarter Time", 40f..1500f, 360f, "ms", 0),
+        ParameterSpec("feedback", "Feedback", 0f..96f, 38f, "%", 1),
+        ParameterSpec("mix", "Mix", 0f..100f, 28f, "%", 2),
+        ParameterSpec("quarter", "Quarter Layer", 0f..100f, 100f, "%", 3),
+        ParameterSpec("sixteenth", "16th Layer", 0f..100f, 0f, "%", 4),
+        ParameterSpec("triplet", "Triplet Layer", 0f..100f, 0f, "%", 5),
+        ParameterSpec("character", "Tape / Digital", -100f..100f, 35f, "%", 6),
+        ParameterSpec("cutoff", "Filter Cutoff", 250f..18000f, 12000f, "Hz", 7),
+        ParameterSpec("resonance", "Filter Resonance", 0f..100f, 10f, "%", 8),
+        ParameterSpec("modulation", "Wow / Mod", 0f..100f, 8f, "%", 9),
+        ParameterSpec("level", "Delay Level", -18f..12f, 0f, "dB", 10))),
     REVERB("Plate Reverb", "RVB", "Reverb", Color(0xFFEF6EAE), 6, listOf(
         ParameterSpec("decay", "Decay", 0.2f..12f, 2.8f, "s", 0), ParameterSpec("tone", "Tone", 0f..100f, 55f, "%", 1), ParameterSpec("mix", "Mix", 0f..100f, 22f, "%", 2))),
     OUTPUT("Output", "OUT", "I/O", Color(0xFFE0E6EC), null, listOf(ParameterSpec("level", "Level", -24f..24f, 0f, "dB"))),
