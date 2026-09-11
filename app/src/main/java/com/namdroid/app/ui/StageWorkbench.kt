@@ -218,6 +218,7 @@ fun StageWorkbench(
 
 @Composable private fun GearFace(block: PedalBlock, modifier: Modifier, large: Boolean, change: ((ParameterSpec, Float) -> Unit)? = null) {
     val isPedal = block.type !in setOf(BlockType.INPUT, BlockType.OUTPUT, BlockType.AMP, BlockType.IR)
+    val expressionPedal = block.type == BlockType.WAH || block.type == BlockType.PITCH
     val resource = when (block.type) {
         BlockType.AMP -> R.drawable.amp
         BlockType.IR -> R.drawable.cab
@@ -228,6 +229,10 @@ fun StageWorkbench(
         BlockType.CHORUS -> R.drawable.pedal_chorus
         BlockType.DELAY -> R.drawable.pedal_delay
         BlockType.REVERB -> R.drawable.pedal_reverb
+        BlockType.WAH -> R.drawable.pedal_wah
+        BlockType.AUTO_WAH -> R.drawable.pedal_auto_wah
+        BlockType.TREMOLO -> R.drawable.pedal_tremolo
+        BlockType.PITCH -> R.drawable.pedal_pitch
         else -> R.drawable.pedal_gate
     }
     Box(modifier.padding(vertical = 3.dp), contentAlignment = Alignment.Center) {
@@ -239,12 +244,30 @@ fun StageWorkbench(
                 contentScale = ContentScale.Fit
             )
         }
+        if (expressionPedal) {
+            val expressionValue = if (block.type == BlockType.WAH) {
+                (block.parameters["position"] ?: 45f) / 100f
+            } else {
+                ((block.parameters["semitones"] ?: 0f) + 12f) / 24f
+            }.coerceIn(0f, 1f)
+            Box(
+                Modifier.fillMaxHeight(.88f).aspectRatio(2f / 3f).graphicsLayer {
+                    rotationX = (0.5f - expressionValue) * 16f
+                    cameraDistance = 12f * density
+                },
+                contentAlignment = Alignment.Center,
+            ) {
+                Image(painterResource(R.drawable.expression_treadle), null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                Text(block.type.shortLabel, color = Color.White, fontWeight = FontWeight.Black,
+                    fontSize = if (large) 15.sp else 8.sp)
+            }
+        }
         if (block.type == BlockType.INPUT || block.type == BlockType.OUTPUT) {
             Canvas(Modifier.fillMaxSize(.62f)) { drawCircle(block.type.color.copy(alpha = .2f)); drawCircle(block.type.color, size.minDimension * .34f, style = Stroke(if (large) 8.dp.toPx() else 3.dp.toPx())) }
             Text(block.type.shortLabel, fontWeight = FontWeight.Black, color = block.type.color, fontSize = if (large) 18.sp else 10.sp)
             return@Box
         }
-        if (isPedal) {
+        if (isPedal && !expressionPedal) {
             // The overlay uses the same 2:3 coordinate space as every pedal asset.
             // Controls therefore remain anchored to the chassis when its rendered size changes.
             BoxWithConstraints(Modifier.fillMaxHeight(.88f).aspectRatio(2f / 3f)) {
