@@ -92,12 +92,17 @@ class Tone3000Client(
         )
     }
 
-    suspend fun searchTones(accessToken: String, query: String): List<Tone> =
+    suspend fun searchTones(
+        accessToken: String,
+        query: String,
+        page: Int = 1,
+        pageSize: Int = 50,
+    ): List<Tone> =
         withContext(Dispatchers.IO) {
             val url = "$baseUrl/tones/search".toHttpUrl().newBuilder()
                 .addQueryParameter("query", query)
-                .addQueryParameter("page", "1")
-                .addQueryParameter("page_size", "25")
+                .addQueryParameter("page", page.coerceAtLeast(1).toString())
+                .addQueryParameter("page_size", pageSize.coerceIn(10, 100).toString())
                 .addQueryParameter("sort", if (query.isBlank()) "trending" else "best-match")
                 .addQueryParameter("format", "nam")
                 .addQueryParameter("architecture", "2")
