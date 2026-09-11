@@ -484,13 +484,30 @@ private fun DelayDroidEditor(
                 if (block.enabled) drawCircle(Color.White.copy(alpha = .7f), radius = size.minDimension * .18f)
             }
             val switchDepth by animateFloatAsState(if (block.enabled) 3f else 0f, spring(stiffness = Spring.StiffnessMedium), label = "switch-depth")
-            Image(
-                painterResource(R.drawable.delay_footswitch),
-                "Activar o desactivar Delay",
+            Box(
                 Modifier.align(Alignment.CenterEnd).offset(x = -maxWidth * .06f, y = maxHeight * .26f)
-                    .size(72.dp).graphicsLayer { translationY = switchDepth }.clickable(onClick = toggle),
-                contentScale = ContentScale.Fit,
-            )
+                    .size(72.dp).clickable(onClick = toggle),
+                contentAlignment = Alignment.Center,
+            ) {
+                Image(
+                    painterResource(R.drawable.delay_footswitch_base),
+                    null,
+                    Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit,
+                )
+                Image(
+                    painterResource(R.drawable.delay_footswitch_cap),
+                    "Activar o desactivar Delay",
+                    Modifier.fillMaxSize().graphicsLayer {
+                        // Sólo el actuador central se hunde; la tuerca y el
+                        // reborde permanecen fijos como en el hardware real.
+                        translationY = switchDepth
+                        scaleX = if (block.enabled) .97f else 1f
+                        scaleY = if (block.enabled) .97f else 1f
+                    },
+                    contentScale = ContentScale.Fit,
+                )
+            }
         }
     }
 }
