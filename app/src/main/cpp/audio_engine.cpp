@@ -421,7 +421,8 @@ bool AudioEngine::start() {
         slot.compressorGain = 1.0f; slot.eqLowState = 0.0f; slot.eqHighState = 0.0f;
         slot.pedalEqState = {};
         slot.delaySmoothedSamples = mSampleRate.load() * 0.36f;
-        slot.delayToneState = 0.0f; slot.delayWriteIndex = 0;
+        slot.delayToneState = 0.0f; slot.delayFilterState = {};
+        slot.delayModPhase = 0.0f; slot.delayWriteIndex = 0;
         slot.delayBuffer.assign(std::max(mSampleRate.load() * 2, 1), 0.0f);
         for (size_t i = 0; i < slot.reverbCombs.size(); ++i) {
             slot.reverbCombs[i].assign(std::max<int>(mSampleRate.load() * combTimes[i], 1), 0.0f);
@@ -448,6 +449,8 @@ bool AudioEngine::start() {
     mDriveAntiAliasState = 0.0f;
     mDelaySmoothedSamples = mSampleRate.load() * 0.36f;
     mDelayToneState = 0.0f;
+    mDelayFilterState = {};
+    mDelayModPhase = 0.0f;
     mEqLowState = 0.0f;
     mEqHighState = 0.0f;
     mCompressorEnvelope = 0.0f;
@@ -627,6 +630,8 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *,
         size_t &delayWriteIndex = instance ? instance->delayWriteIndex : mDelayWriteIndex;
         float &delaySmoothedSamples = instance ? instance->delaySmoothedSamples : mDelaySmoothedSamples;
         float &delayToneState = instance ? instance->delayToneState : mDelayToneState;
+        auto &delayFilterState = instance ? instance->delayFilterState : mDelayFilterState;
+        float &delayModPhase = instance ? instance->delayModPhase : mDelayModPhase;
         auto &reverbCombs = instance ? instance->reverbCombs : mReverbCombs;
         auto &reverbAllpasses = instance ? instance->reverbAllpasses : mReverbAllpasses;
         auto &reverbCombIndices = instance ? instance->reverbCombIndices : mReverbCombIndices;
@@ -771,20 +776,54 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *,
         } else if (effect == 5 && !delayBuffer.empty()) {
             const float timeMs = std::clamp(parameter(0), 40.0f, 1500.0f);
             const float targetDelaySamples = std::min<float>(mSampleRate.load() * timeMs / 1000.0f, delayBuffer.size() - 2);
-            const float feedback = std::clamp(parameter(1) / 100.0f, 0.0f, 0.92f);
+            const float feedback = std::clamp(parameter(1) / 100.0f, 0.0f, 0.96f);
             const float mix = std::clamp(parameter(2) / 100.0f, 0.0f, 1.0f);
+            const float quarterLevel = std::clamp(parameter(3) / 100.0f, 0.0f, 1.0f);
+            const float sixteenthLevel = std::clamp(parameter(4) / 100.0f, 0.0f, 1.0f);
+            const float tripletLevel = std::clamp(parameter(5) / 100.0f, 0.0f, 1.0f);
+            const float character = std::clamp((parameter(6) + 100.0f) / 200.0f, 0.0f, 1.0f);
+            const float cutoff = std::clamp(parameter(7), 250.0f, 18000.0f);
+            const float resonance = std::clamp(parameter(8) / 100.0f, 0.0f, 1.0f);
+            const float modulation = std::clamp(parameter(9) / 100.0f, 0.0f, 1.0f);
+            const float delayLevel = dbToLinear(parameter(10));
+            const float filterG = std::clamp(1.0f - std::exp(-6.2831853f * cutoff / mSampleRate.load()), 0.001f, 0.95f);
+            const float layerNorm = std::max(quarterLevel + sixteenthLevel + tripletLevel, 1.0f);
+            const auto readTap = [&](float delaySamples) {
+                const float bounded = std::clamp(delaySamples, 1.0f, static_cast<float>(delayBuffer.size() - 2));
+                const size_t whole = static_cast<size_t>(bounded);
+                const float fraction = bounded - static_cast<float>(whole);
+                const size_t readA = (delayWriteIndex + delayBuffer.size() - whole) % delayBuffer.size();
+                const size_t readB = (readA + delayBuffer.size() - 1) % delayBuffer.size();
+                return delayBuffer[readA] * (1.0f - fraction) + delayBuffer[readB] * fraction;
+            };
             for (int32_t i = 0; i < frames; ++i) {
                 delaySmoothedSamples += (targetDelaySamples - delaySmoothedSamples) * 0.0008f;
-                const size_t wholeDelay = static_cast<size_t>(delaySmoothedSamples);
-                const float fraction = delaySmoothedSamples - wholeDelay;
-                const size_t readA = (delayWriteIndex + delayBuffer.size() - wholeDelay) % delayBuffer.size();
-                const size_t readB = (readA + delayBuffer.size() - 1) % delayBuffer.size();
-                const float wet = delayBuffer[readA] * (1.0f - fraction) + delayBuffer[readB] * fraction;
                 const float dry = mMonoResult[i];
-                delayToneState += 0.18f * (wet - delayToneState);
-                delayBuffer[delayWriteIndex] = dry + delayToneState * feedback;
-                mMonoResult[i] = dry * (1.0f - mix) + delayToneState * mix;
+                const float wow = std::sin(delayModPhase) * modulation * mSampleRate.load() * 0.0025f;
+                const float quarter = readTap(delaySmoothedSamples + wow);
+                const float sixteenth = readTap(delaySmoothedSamples * 0.25f + wow * 0.45f);
+                const float triplet = readTap(delaySmoothedSamples * 0.6666667f - wow * 0.7f);
+                float layered = (quarter * quarterLevel + sixteenth * sixteenthLevel +
+                    triplet * tripletLevel) / layerNorm;
+
+                // Cuatro polos resonantes sobre la ruta wet. El drive suave y
+                // la perdida de agudos aumentan hacia el extremo "tape";
+                // el extremo digital conserva mejor los transientes.
+                const float ladderInput = std::tanh(layered * (1.0f + (1.0f - character) * 1.8f) -
+                    delayFilterState[3] * resonance * 3.2f);
+                float stageInput = ladderInput;
+                for (float &stage : delayFilterState) {
+                    stage += filterG * (stageInput - stage);
+                    stageInput = stage;
+                }
+                const float filtered = delayFilterState[3];
+                delayToneState += (0.035f + character * 0.35f) * (filtered - delayToneState);
+                const float repeat = delayToneState * (0.35f + character * 0.65f);
+                delayBuffer[delayWriteIndex] = std::tanh(dry + repeat * feedback);
+                mMonoResult[i] = (dry * (1.0f - mix) + repeat * mix) * delayLevel;
                 delayWriteIndex = (delayWriteIndex + 1) % delayBuffer.size();
+                delayModPhase += 6.2831853f * (0.12f + modulation * 0.55f) / mSampleRate.load();
+                if (delayModPhase > 6.2831853f) delayModPhase -= 6.2831853f;
             }
         } else if (effect == 6 && !reverbCombs[0].empty()) {
             const float decay = std::clamp(parameter(0), 0.2f, 12.0f);
