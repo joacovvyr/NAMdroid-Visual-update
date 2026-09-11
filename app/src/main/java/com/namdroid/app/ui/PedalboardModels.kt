@@ -95,6 +95,12 @@ enum class BlockType(val label: String, val shortLabel: String, val category: St
         ParameterSpec("window", "Quality / Window", 12f..80f, 42f, "ms", 3),
         ParameterSpec("tone", "Tone", 0f..100f, 75f, "%", 4),
         ParameterSpec("level", "Level", -12f..12f, 0f, "dB", 5))),
+    DETUNE("Drop Detune", "DETUNE", "Pitch", Color(0xFF1677FF), 14, listOf(
+        ParameterSpec("drop", "Drop Tuning", 0f..8f, 2f, "step", 0),
+        ParameterSpec("mix", "Mix", 0f..100f, 100f, "%", 1),
+        ParameterSpec("window", "Tracking / Window", 18f..90f, 52f, "ms", 2),
+        ParameterSpec("tone", "Tone", 0f..100f, 78f, "%", 3),
+        ParameterSpec("level", "Level", -12f..12f, 0f, "dB", 4))),
     DELAY("Layer Delay", "DLY", "Delay", Color(0xFF40C9C6), 5, listOf(
         ParameterSpec("time", "Quarter Time", 40f..1500f, 360f, "ms", 0),
         ParameterSpec("feedback", "Feedback", 0f..96f, 38f, "%", 1),
