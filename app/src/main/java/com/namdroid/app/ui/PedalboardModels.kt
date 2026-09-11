@@ -18,9 +18,20 @@ enum class BlockType(val label: String, val shortLabel: String, val category: St
         ParameterSpec("makeup", "Makeup", 0f..24f, 3f, "dB", 5),
         ParameterSpec("mix", "Parallel Mix", 0f..100f, 100f, "%", 6))),
     GATE("Noise Gate", "GATE", "Dynamics", Color(0xFF52D273), 1, listOf(
-        ParameterSpec("threshold", "Threshold", -80f..-20f, -52f, "dB", 0), ParameterSpec("release", "Release", 20f..500f, 120f, "ms", 1))),
+        ParameterSpec("threshold", "Threshold", -80f..-20f, -52f, "dB", 0),
+        ParameterSpec("release", "Release", 20f..1000f, 120f, "ms", 1),
+        ParameterSpec("attack", "Attack", 0.1f..25f, 2f, "ms", 2),
+        ParameterSpec("hold", "Hold", 0f..500f, 60f, "ms", 3),
+        ParameterSpec("range", "Reduction", 10f..100f, 80f, "dB", 4),
+        ParameterSpec("hysteresis", "Hysteresis", 0f..18f, 6f, "dB", 5))),
     DRIVE("Green Drive", "DRV", "Distortion", WarmOrange, 2, listOf(
-        ParameterSpec("gain", "Gain", 0f..100f, 45f, "%", 0), ParameterSpec("tone", "Tone", 0f..100f, 55f, "%", 1), ParameterSpec("level", "Level", -12f..12f, 0f, "dB", 2))),
+        ParameterSpec("gain", "Gain", 0f..100f, 45f, "%", 0),
+        ParameterSpec("tone", "Tone", 0f..100f, 55f, "%", 1),
+        ParameterSpec("level", "Level", -18f..18f, 0f, "dB", 2),
+        ParameterSpec("tight", "Tight / Low Cut", 20f..650f, 90f, "Hz", 3),
+        ParameterSpec("character", "Soft / Hard", 0f..100f, 35f, "%", 4),
+        ParameterSpec("mix", "Clean Mix", 0f..100f, 100f, "%", 5),
+        ParameterSpec("bias", "Bias", -50f..50f, 0f, "%", 6))),
     AMP("NAM Amplifier", "NAM", "Amplifier", ElectricBlue, 3, listOf(
         ParameterSpec("input", "Input / Drive", -18f..18f, 0f, "dB", 0),
         ParameterSpec("bass", "Bass", -12f..12f, 0f, "dB", 1),
