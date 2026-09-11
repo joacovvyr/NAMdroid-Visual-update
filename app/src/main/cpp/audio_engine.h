@@ -83,6 +83,7 @@ private:
     // dimensiona los buffers internos del modelo (ver loadModel()).
     static constexpr int32_t kMaxBufferFrames = 4096;
     static constexpr int32_t kMaxEffectSlots = 16;
+    static constexpr int32_t kMaxEffectParams = 11;
     static constexpr size_t kTunerBufferFrames = 4096;
     static constexpr size_t kTransitionFrames = 256;
 
@@ -113,7 +114,11 @@ private:
     struct EffectSlot {
         std::atomic<int> type{0};
         std::atomic<bool> enabled{false};
-        std::array<std::atomic<float>, 3> params{};
+        std::array<std::atomic<float>, kMaxEffectParams> params{};
+        std::array<std::array<float, 2>, 5> ampEqState{};
+        float ampLowCutState{0.0f};
+        float ampHighCutState{0.0f};
+        float ampLowCutPrevious{0.0f};
         float drivePreviousInput{0.0f};
         float driveAntiAliasState{0.0f};
         float gateEnvelope{0.0f};
