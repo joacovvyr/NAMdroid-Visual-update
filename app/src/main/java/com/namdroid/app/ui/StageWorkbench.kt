@@ -219,6 +219,7 @@ fun StageWorkbench(
 @Composable private fun GearFace(block: PedalBlock, modifier: Modifier, large: Boolean, change: ((ParameterSpec, Float) -> Unit)? = null) {
     val isPedal = block.type !in setOf(BlockType.INPUT, BlockType.OUTPUT, BlockType.AMP, BlockType.IR)
     val expressionPedal = block.type == BlockType.WAH || block.type == BlockType.PITCH
+    val detunePedal = block.type == BlockType.DETUNE
     val resource = when (block.type) {
         BlockType.AMP -> R.drawable.amp
         BlockType.IR -> R.drawable.cab
@@ -233,6 +234,7 @@ fun StageWorkbench(
         BlockType.AUTO_WAH -> R.drawable.pedal_auto_wah
         BlockType.TREMOLO -> R.drawable.pedal_tremolo
         BlockType.PITCH -> R.drawable.pedal_pitch
+        BlockType.DETUNE -> R.drawable.pedal_detune
         else -> R.drawable.pedal_gate
     }
     Box(modifier.padding(vertical = 3.dp), contentAlignment = Alignment.Center) {
@@ -267,7 +269,45 @@ fun StageWorkbench(
             Text(block.type.shortLabel, fontWeight = FontWeight.Black, color = block.type.color, fontSize = if (large) 18.sp else 10.sp)
             return@Box
         }
-        if (isPedal && !expressionPedal) {
+        if (detunePedal) {
+            val selectedDrop = (block.parameters["drop"] ?: 2f).roundToInt().coerceIn(0, 8)
+            BoxWithConstraints(Modifier.fillMaxHeight(.88f).aspectRatio(2f / 3f)) {
+                Canvas(Modifier.fillMaxSize()) {
+                    val positions = listOf(
+                        Offset(size.width * .27f, size.height * .43f),
+                        Offset(size.width * .21f, size.height * .34f),
+                        Offset(size.width * .22f, size.height * .24f),
+                        Offset(size.width * .32f, size.height * .15f),
+                        Offset(size.width * .50f, size.height * .11f),
+                        Offset(size.width * .68f, size.height * .15f),
+                        Offset(size.width * .78f, size.height * .24f),
+                        Offset(size.width * .79f, size.height * .34f),
+                        Offset(size.width * .73f, size.height * .43f),
+                    )
+                    val radius = size.minDimension * if (large) .027f else .023f
+                    positions.forEachIndexed { index, center ->
+                        drawCircle(Color.Black.copy(alpha = .78f), radius * 1.45f, center)
+                        drawCircle(if (index == selectedDrop && block.enabled) Color(0xFF42F5FF) else Color(0xFF263640), radius, center)
+                        if (index == selectedDrop && block.enabled) {
+                            drawCircle(Color.White.copy(alpha = .8f), radius * .35f, center)
+                        }
+                    }
+                }
+                MasterKnob(
+                    fraction = selectedDrop / 8f,
+                    tint = Color(0xFF42F5FF),
+                    modifier = Modifier.align(Alignment.TopCenter).offset(y = maxHeight * .20f)
+                        .size(if (large) 58.dp else 29.dp),
+                    strokeDp = if (large) 3f else 1.5f,
+                )
+                Canvas(Modifier.align(Alignment.TopCenter).offset(y = maxHeight * .75f).size(if (large) 28.dp else 14.dp)) {
+                    val radius = size.minDimension * .43f
+                    drawCircle(Brush.radialGradient(listOf(Color.White, Color(0xFF89939A), Color(0xFF242B30))), radius)
+                    drawCircle(Color(0xFF1D2429), radius * .7f, style = Stroke(if (large) 1.5.dp.toPx() else 1.dp.toPx()))
+                }
+            }
+        }
+        if (isPedal && !expressionPedal && !detunePedal) {
             // The overlay uses the same 2:3 coordinate space as every pedal asset.
             // Controls therefore remain anchored to the chassis when its rendered size changes.
             BoxWithConstraints(Modifier.fillMaxHeight(.88f).aspectRatio(2f / 3f)) {
@@ -289,7 +329,7 @@ fun StageWorkbench(
                     drawCircle(Color(0xFF1D2429), r * .7f, style = Stroke(if (large) 1.5.dp.toPx() else 1.dp.toPx()))
                 }
             }
-        } else {
+        } else if (!detunePedal) {
             Column(Modifier.fillMaxWidth(.72f).fillMaxHeight(.62f), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(block.type.label.uppercase(), color = Color.White, fontSize = if (large) 13.sp else 8.sp, fontWeight = FontWeight.Black, letterSpacing = if (large) 1.sp else .5.sp, maxLines = 1)
                 Spacer(Modifier.weight(1f))
