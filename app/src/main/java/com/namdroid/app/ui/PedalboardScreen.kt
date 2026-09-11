@@ -89,17 +89,19 @@ fun PedalboardScreen(
     fun currentRig() = RigPreset(rigs[activeRigIndex].id, rigName, bpm, blocks.toList(), rigs[activeRigIndex].scenes)
     fun persist() { rigs = rigs.toMutableList().also { it[activeRigIndex] = currentRig() }; store.saveAll(rigs); store.selectRig(rigs[activeRigIndex].id) }
     fun syncEngine() {
-        (1..9).forEach { engine.setEffectEnabled(it, false) }
         blocks.firstOrNull { it.type == BlockType.INPUT }?.parameters?.get("level")?.let(engine::setInputGainDb)
         blocks.firstOrNull { it.type == BlockType.OUTPUT }?.parameters?.get("level")?.let(engine::setOutputGainDb)
         engine.setBypass(!(blocks.firstOrNull { it.type == BlockType.AMP }?.enabled ?: false))
-        blocks.forEach { block ->
-            block.type.engineId?.let { effect ->
-                engine.setEffectEnabled(effect, block.enabled)
-                block.type.parameters.forEach { spec -> engine.setEffectParam(effect, spec.engineParam, block.parameters[spec.key] ?: spec.default) }
+        val effects = blocks.filter { it.type.engineId != null }.take(16)
+        val types = effects.map { it.type.engineId!! }.toIntArray()
+        val enabled = BooleanArray(effects.size) { effects[it].enabled }
+        val params = FloatArray(effects.size * 3)
+        effects.forEachIndexed { index, block ->
+            block.type.parameters.forEach { spec ->
+                params[index * 3 + spec.engineParam] = block.parameters[spec.key] ?: spec.default
             }
         }
-        engine.setEffectOrder(blocks.mapNotNull { it.type.engineId }.toIntArray())
+        engine.setEffectChain(types, enabled, params)
     }
     fun restoreAssets() {
         blocks.indices.forEach { index ->
@@ -182,8 +184,7 @@ fun PedalboardScreen(
     fun setSelectedEnabled(enabled: Boolean) {
         val block = selected ?: return
         updateBlock(block.id) { it.copy(enabled = enabled) }
-        block.type.engineId?.let { engine.setEffectEnabled(it, enabled) }
-        if (block.type == BlockType.AMP) engine.setBypass(!enabled)
+        syncEngine()
     }
     fun setSelectedParameter(spec: ParameterSpec, value: Float) {
         val block = selected ?: return
@@ -191,7 +192,7 @@ fun PedalboardScreen(
         when (block.type) {
             BlockType.INPUT -> engine.setInputGainDb(value)
             BlockType.OUTPUT -> engine.setOutputGainDb(value)
-            else -> block.type.engineId?.let { engine.setEffectParam(it, spec.engineParam, value) }
+            else -> syncEngine()
         }
     }
     fun deleteSelected() {
@@ -212,7 +213,7 @@ fun PedalboardScreen(
             blocks.indexOfFirst { it.type == BlockType.DELAY }.takeIf { it >= 0 }?.let { index ->
                 val time = (60000f / bpm).coerceIn(40f, 1500f)
                 blocks[index] = blocks[index].copy(parameters = blocks[index].parameters + ("time" to time))
-                engine.setEffectParam(5, 0, time)
+                syncEngine()
             }
             persist()
         }
@@ -228,14 +229,13 @@ fun PedalboardScreen(
         onMove = { from, to ->
             if (from in blocks.indices && to in blocks.indices && blocks[from].type.engineId != null && blocks[to].type.engineId != null) {
                 val block = blocks.removeAt(from); blocks.add(to, block)
-                engine.setEffectOrder(blocks.mapNotNull { it.type.engineId }.toIntArray()); persist()
+                syncEngine(); persist()
             }
         },
         onToggleBlock = { id ->
             blocks.firstOrNull { it.id == id }?.let { block ->
                 updateBlock(id) { it.copy(enabled = !it.enabled) }
-                block.type.engineId?.let { engine.setEffectEnabled(it, !block.enabled) }
-                if (block.type == BlockType.AMP) engine.setBypass(block.enabled)
+                syncEngine()
             }
         },
         onParameter = ::setSelectedParameter, onDelete = ::deleteSelected,
@@ -256,7 +256,16 @@ fun PedalboardScreen(
         persist(); val newRig = RigPreset(name = "Rig ${rigs.size + 1}"); rigs = rigs + newRig; store.saveAll(rigs); loadRig(rigs.lastIndex); showLibrary = false
     }, { index -> if (rigs.size > 1) { val remaining = rigs.filterIndexed { i, _ -> i != index }; rigs = remaining; activeRigIndex = 0; rigName = remaining.first().name; bpm = remaining.first().bpm; blocks.clear(); blocks.addAll(remaining.first().blocks); selectedId = blocks.firstOrNull { it.type == BlockType.AMP }?.id ?: blocks.first().id; store.saveAll(remaining); restoreAssets(); persist() } }, { from, to -> if (from in rigs.indices && to in rigs.indices) { val activeId = rigs[activeRigIndex].id; val reordered = rigs.toMutableList(); val moved = reordered.removeAt(from); reordered.add(to, moved); rigs = reordered; activeRigIndex = reordered.indexOfFirst { it.id == activeId }; store.saveAll(reordered) } }, { showLibrary = false; showRename = true }, { exportRigs.launch("NAMDroid-rigs.json") }, { importRigs.launch(arrayOf("application/json", "text/plain")) }, { showLibrary = false })
     if (showRename) RenameDialog(rigName, { rigName = it; persist(); showRename = false }, { showRename = false })
-    if (showAddBlock) StageAddBlock(blocks.map { it.type }.toSet(), { type -> val output = blocks.indexOfFirst { it.type == BlockType.OUTPUT }.let { if (it < 0) blocks.size else it }; val block = PedalBlock(type = type, enabled = false); blocks.add(output, block); selectedId = block.id; syncEngine(); persist(); showAddBlock = false }, { showAddBlock = false })
+    if (showAddBlock) StageAddBlock(blocks.map { it.type }.toSet(), { type ->
+        if (blocks.count { it.type.engineId != null } >= 16) {
+            notice = "La cadena admite hasta 16 bloques DSP"
+        } else {
+            val output = blocks.indexOfFirst { it.type == BlockType.OUTPUT }.let { if (it < 0) blocks.size else it }
+            val block = PedalBlock(type = type, enabled = false)
+            blocks.add(output, block); selectedId = block.id; syncEngine(); persist()
+        }
+        showAddBlock = false
+    }, { showAddBlock = false })
     if (showTuner) StageTuner(engine, running, { showTuner = false })
     if (showLooper) StageLooper(engine, running, { showLooper = false })
     if (showSettings) SettingsDialog(

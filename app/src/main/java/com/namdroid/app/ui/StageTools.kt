@@ -77,7 +77,9 @@ import kotlin.math.roundToInt
 }
 
 @Composable fun StageAddBlock(existing: Set<BlockType>, add: (BlockType) -> Unit, close: () -> Unit) {
-    val available = BlockType.entries.filter { it.engineId != null && it !in existing }
+    val available = BlockType.entries.filter {
+        it.engineId != null && (it !in existing || it !in setOf(BlockType.AMP, BlockType.IR))
+    }
     StageToolWindow("BIBLIOTECA DE EFECTOS", close) {
         if (available.isEmpty()) Text("Todos los tipos de efecto ya están en este rig.", Modifier.padding(16.dp))
         LazyVerticalGrid(GridCells.Adaptive(200.dp), Modifier.weight(1f).padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {

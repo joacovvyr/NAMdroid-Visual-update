@@ -40,6 +40,7 @@ public:
     void setEffectAmount(int effectId, float amount);
     void setEffectOrder(const int *order, int count);
     void setEffectParam(int effectId, int param, float value);
+    void setEffectChain(const int *types, const bool *enabled, const float *params, int count);
     void beginTransition() { requestCrossfade(); }
     void setTunerEnabled(bool enabled) { mTunerEnabled.store(enabled); }
     void setAudioDeviceIds(int32_t inputDeviceId, int32_t outputDeviceId) {
@@ -81,6 +82,7 @@ private:
     // en el callback de audio) y para llamar a DSP::Reset(), que es quien
     // dimensiona los buffers internos del modelo (ver loadModel()).
     static constexpr int32_t kMaxBufferFrames = 4096;
+    static constexpr int32_t kMaxEffectSlots = 16;
     static constexpr size_t kTunerBufferFrames = 4096;
     static constexpr size_t kTransitionFrames = 256;
 
@@ -108,6 +110,29 @@ private:
     std::array<std::array<std::atomic<float>, 3>, 10> mEffectParams{};
     std::array<std::atomic<int>, 9> mEffectOrder{};
     std::atomic<int> mEffectCount{9};
+    struct EffectSlot {
+        std::atomic<int> type{0};
+        std::atomic<bool> enabled{false};
+        std::array<std::atomic<float>, 3> params{};
+        float drivePreviousInput{0.0f};
+        float driveAntiAliasState{0.0f};
+        float gateEnvelope{0.0f};
+        float eqLowState{0.0f};
+        float eqHighState{0.0f};
+        float delaySmoothedSamples{17280.0f};
+        float delayToneState{0.0f};
+        size_t delayWriteIndex{0};
+        std::vector<float> delayBuffer;
+        std::array<std::vector<float>, 4> reverbCombs;
+        std::array<std::vector<float>, 2> reverbAllpasses;
+        std::array<size_t, 4> reverbCombIndices{};
+        std::array<size_t, 2> reverbAllpassIndices{};
+        std::vector<float> chorusBuffer;
+        size_t chorusWriteIndex{0};
+        float chorusPhase{0.0f};
+    };
+    std::array<EffectSlot, kMaxEffectSlots> mEffectSlots;
+    std::atomic<int> mEffectSlotCount{0};
     std::atomic<float> mInputLevelDb{-90.0f};
     std::atomic<float> mOutputLevelDb{-90.0f};
     std::atomic<bool> mTunerEnabled{false};

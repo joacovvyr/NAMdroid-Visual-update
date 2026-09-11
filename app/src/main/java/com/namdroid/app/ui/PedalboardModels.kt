@@ -68,6 +68,9 @@ fun rigFromJson(json: JSONObject): RigPreset {
     val normalizedScenes = List(4) { index -> scenes.getOrNull(index) ?: RigScene(('A'.code + index).toChar().toString(), emptyMap()) }
     require(blocks.isNotEmpty()) { "El rig no contiene bloques" }
     require(blocks.map { it.id }.distinct().size == blocks.size) { "El rig contiene identificadores repetidos" }
-    require(blocks.map { it.type }.distinct().size == blocks.size) { "El motor admite un bloque de cada tipo" }
+    require(blocks.count { it.type == BlockType.INPUT } == 1) { "El rig debe tener una entrada" }
+    require(blocks.count { it.type == BlockType.OUTPUT } == 1) { "El rig debe tener una salida" }
+    require(blocks.count { it.type == BlockType.AMP } <= 1) { "El rig admite un amplificador" }
+    require(blocks.count { it.type == BlockType.IR } <= 1) { "El rig admite un cabinet IR" }
     return RigPreset(json.optString("id", UUID.randomUUID().toString()), json.optString("name", "Imported Rig"), json.optInt("bpm", 120).coerceIn(30, 300), blocks, normalizedScenes)
 }
