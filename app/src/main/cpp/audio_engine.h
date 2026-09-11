@@ -129,6 +129,8 @@ private:
         std::array<std::array<float, 2>, 5> pedalEqState{};
         float delaySmoothedSamples{17280.0f};
         float delayToneState{0.0f};
+        std::array<float, 4> delayFilterState{};
+        float delayModPhase{0.0f};
         size_t delayWriteIndex{0};
         std::vector<float> delayBuffer;
         std::array<std::vector<float>, 4> reverbCombs;
@@ -224,6 +226,8 @@ private:
     float mDriveAntiAliasState{0.0f};
     float mDelaySmoothedSamples{17280.0f};
     float mDelayToneState{0.0f};
+    std::array<float, 4> mDelayFilterState{};
+    float mDelayModPhase{0.0f};
     float mEqLowState{0.0f};
     float mEqHighState{0.0f};
     float mCompressorEnvelope{0.0f};
