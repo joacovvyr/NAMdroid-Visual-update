@@ -121,7 +121,13 @@ private:
         float ampLowCutPrevious{0.0f};
         float drivePreviousInput{0.0f};
         float driveAntiAliasState{0.0f};
+        float driveLowCutState{0.0f};
+        float driveLowCutPrevious{0.0f};
+        float driveToneState{0.0f};
         float gateEnvelope{0.0f};
+        float gateGain{0.0f};
+        int32_t gateHoldFrames{0};
+        bool gateOpen{false};
         float compressorEnvelope{0.0f};
         float compressorGain{1.0f};
         float eqLowState{0.0f};
@@ -224,6 +230,9 @@ private:
     float mChorusToneState{0.0f};
     float mDrivePreviousInput{0.0f};
     float mDriveAntiAliasState{0.0f};
+    float mDriveLowCutState{0.0f};
+    float mDriveLowCutPrevious{0.0f};
+    float mDriveToneState{0.0f};
     float mDelaySmoothedSamples{17280.0f};
     float mDelayToneState{0.0f};
     std::array<float, 4> mDelayFilterState{};
@@ -234,6 +243,9 @@ private:
     float mCompressorGain{1.0f};
     std::array<std::array<float, 2>, 5> mPedalEqState{};
     float mGateEnvelope{0.0f};
+    float mGateGain{0.0f};
+    int32_t mGateHoldFrames{0};
+    bool mGateOpen{false};
     float mIrLowpassState{0.0f};
     float mIrHighpassState{0.0f};
     float mIrPreviousInput{0.0f};
