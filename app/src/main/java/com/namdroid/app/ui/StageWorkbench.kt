@@ -49,8 +49,6 @@ import androidx.compose.ui.zIndex
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import com.namdroid.app.R
-import kotlin.math.cos
-import kotlin.math.sin
 import kotlin.math.roundToInt
 
 private val StageBlack = Color(0xFF090C10)
@@ -281,14 +279,28 @@ fun StageWorkbench(
     val currentValue by rememberUpdatedState(value); val currentChange by rememberUpdatedState(change)
     val fraction = ((value - spec.range.start) / (spec.range.endInclusive - spec.range.start)).coerceIn(0f, 1f)
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(if (large) 32.dp else 20.dp)) {
-        Canvas(Modifier.size(if (large) 24.dp else 14.dp).then(if (change == null) Modifier else Modifier.pointerInput(spec.key) {
+        MasterKnob(fraction, tint, Modifier.size(if (large) 24.dp else 14.dp).then(if (change == null) Modifier else Modifier.pointerInput(spec.key) {
             detectVerticalDragGestures { event, amount -> event.consume(); currentChange?.invoke((currentValue - amount / 180.dp.toPx() * (spec.range.endInclusive - spec.range.start)).coerceIn(spec.range)) }
-        })) {
-            val r = size.minDimension * .38f; val angle = (135 + fraction * 270) * Math.PI / 180
-            drawArc(Color.Black.copy(alpha = .55f), 135f, 270f, false, style = Stroke(if (large) 2.dp.toPx() else 1.dp.toPx(), cap = StrokeCap.Round))
-            drawCircle(Brush.radialGradient(listOf(Color(0xFF5F6B74), Color(0xFF11161A))), r)
-            drawLine(tint, center + Offset(cos(angle).toFloat(), sin(angle).toFloat()) * (r * .48f), center + Offset(cos(angle).toFloat(), sin(angle).toFloat()) * (r * .84f), if (large) 1.5.dp.toPx() else 1.dp.toPx(), StrokeCap.Round)
+        }), if (large) 2f else 1f)
+    }
+}
+
+@Composable private fun MasterKnob(fraction: Float, tint: Color, modifier: Modifier, strokeDp: Float) {
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) {
+            drawArc(Color.Black.copy(alpha = .55f), 135f, 270f, false,
+                style = Stroke(strokeDp.dp.toPx(), cap = StrokeCap.Round))
+            drawArc(tint, 135f, fraction.coerceIn(0f, 1f) * 270f, false,
+                style = Stroke(strokeDp.dp.toPx(), cap = StrokeCap.Round))
         }
+        Image(
+            painter = painterResource(R.drawable.knob_master),
+            contentDescription = null,
+            modifier = Modifier.fillMaxSize(.86f).graphicsLayer {
+                rotationZ = -135f + fraction.coerceIn(0f, 1f) * 270f
+            },
+            contentScale = ContentScale.Fit,
+        )
     }
 }
 
@@ -329,16 +341,9 @@ fun StageWorkbench(
     val fraction = ((value - spec.range.start) / (spec.range.endInclusive - spec.range.start)).coerceIn(0f, 1f)
     Column(Modifier.background(StageSurface, RoundedCornerShape(9.dp)).padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Canvas(Modifier.size(64.dp).pointerInput(blockId, spec.key) {
+        MasterKnob(fraction, tint, Modifier.size(64.dp).pointerInput(blockId, spec.key) {
             detectVerticalDragGestures { event, amount -> event.consume(); currentChange((currentValue - amount / 240.dp.toPx() * (spec.range.endInclusive - spec.range.start)).coerceIn(spec.range)) }
-        }) {
-            val r = size.minDimension * .38f
-            drawArc(StageLine, 135f, 270f, false, Offset(3f, 3f), Size(size.width - 6f, size.height - 6f), style = Stroke(4.dp.toPx(), cap = StrokeCap.Round))
-            drawArc(tint, 135f, fraction * 270f, false, Offset(3f, 3f), Size(size.width - 6f, size.height - 6f), style = Stroke(4.dp.toPx(), cap = StrokeCap.Round))
-            drawCircle(Brush.radialGradient(listOf(Color(0xFF424E5A), Color(0xFF141B22))), r)
-            val angle = (135 + fraction * 270) * Math.PI / 180
-            drawLine(Color.White, center + Offset(cos(angle).toFloat(), sin(angle).toFloat()) * (r * .55f), center + Offset(cos(angle).toFloat(), sin(angle).toFloat()) * (r * .85f), 3.dp.toPx(), StrokeCap.Round)
-        }
+        }, 4f)
             Column(Modifier.weight(1f).padding(start = 8.dp)) {
                 Text(spec.label.uppercase(), fontSize = 11.sp, color = Color.LightGray)
                 TextButton({ text = "%.3f".format(java.util.Locale.US, value); exact = true }, contentPadding = PaddingValues(0.dp)) { Text("${"%.1f".format(value)} ${spec.unit}", color = tint, fontWeight = FontWeight.Bold) }

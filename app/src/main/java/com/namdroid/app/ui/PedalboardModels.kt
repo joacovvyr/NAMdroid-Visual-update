@@ -10,11 +10,28 @@ data class ParameterSpec(val key: String, val label: String, val range: ClosedFl
 enum class BlockType(val label: String, val shortLabel: String, val category: String, val color: Color, val engineId: Int?, val parameters: List<ParameterSpec>) {
     INPUT("Input", "IN", "I/O", SignalGreen, null, listOf(ParameterSpec("level", "Gain", -24f..24f, 0f, "dB"))),
     COMPRESSOR("Studio Comp", "COMP", "Dynamics", Color(0xFFFFD166), 8, listOf(
-        ParameterSpec("threshold", "Threshold", -60f..0f, -18f, "dB", 0), ParameterSpec("ratio", "Ratio", 1f..12f, 4f, ":1", 1), ParameterSpec("makeup", "Makeup", 0f..18f, 3f, "dB", 2))),
+        ParameterSpec("threshold", "Threshold", -60f..0f, -18f, "dB", 0),
+        ParameterSpec("ratio", "Ratio", 1f..20f, 4f, ":1", 1),
+        ParameterSpec("attack", "Attack", 0.1f..100f, 12f, "ms", 2),
+        ParameterSpec("release", "Release", 20f..1000f, 180f, "ms", 3),
+        ParameterSpec("knee", "Soft Knee", 0f..18f, 6f, "dB", 4),
+        ParameterSpec("makeup", "Makeup", 0f..24f, 3f, "dB", 5),
+        ParameterSpec("mix", "Parallel Mix", 0f..100f, 100f, "%", 6))),
     GATE("Noise Gate", "GATE", "Dynamics", Color(0xFF52D273), 1, listOf(
-        ParameterSpec("threshold", "Threshold", -80f..-20f, -52f, "dB", 0), ParameterSpec("release", "Release", 20f..500f, 120f, "ms", 1))),
+        ParameterSpec("threshold", "Threshold", -80f..-20f, -52f, "dB", 0),
+        ParameterSpec("release", "Release", 20f..1000f, 120f, "ms", 1),
+        ParameterSpec("attack", "Attack", 0.1f..25f, 2f, "ms", 2),
+        ParameterSpec("hold", "Hold", 0f..500f, 60f, "ms", 3),
+        ParameterSpec("range", "Reduction", 10f..100f, 80f, "dB", 4),
+        ParameterSpec("hysteresis", "Hysteresis", 0f..18f, 6f, "dB", 5))),
     DRIVE("Green Drive", "DRV", "Distortion", WarmOrange, 2, listOf(
-        ParameterSpec("gain", "Gain", 0f..100f, 45f, "%", 0), ParameterSpec("tone", "Tone", 0f..100f, 55f, "%", 1), ParameterSpec("level", "Level", -12f..12f, 0f, "dB", 2))),
+        ParameterSpec("gain", "Gain", 0f..100f, 45f, "%", 0),
+        ParameterSpec("tone", "Tone", 0f..100f, 55f, "%", 1),
+        ParameterSpec("level", "Level", -18f..18f, 0f, "dB", 2),
+        ParameterSpec("tight", "Tight / Low Cut", 20f..650f, 90f, "Hz", 3),
+        ParameterSpec("character", "Soft / Hard", 0f..100f, 35f, "%", 4),
+        ParameterSpec("mix", "Clean Mix", 0f..100f, 100f, "%", 5),
+        ParameterSpec("bias", "Bias", -50f..50f, 0f, "%", 6))),
     AMP("NAM Amplifier", "NAM", "Amplifier", ElectricBlue, 3, listOf(
         ParameterSpec("input", "Input / Drive", -18f..18f, 0f, "dB", 0),
         ParameterSpec("bass", "Bass", -12f..12f, 0f, "dB", 1),
@@ -29,12 +46,36 @@ enum class BlockType(val label: String, val shortLabel: String, val category: St
         ParameterSpec("output", "Output", -24f..18f, 0f, "dB", 10))),
     IR("IR Cabinet", "IR", "Cabinet", Color(0xFF4CC9F0), 7, listOf(
         ParameterSpec("level", "Level", -18f..12f, 0f, "dB", 0), ParameterSpec("lowcut", "Low Cut", 20f..300f, 70f, "Hz", 1), ParameterSpec("highcut", "High Cut", 3000f..20000f, 12000f, "Hz", 2))),
-    EQ("Three Band EQ", "EQ", "Equalizer", Color(0xFFC77DFF), 4, listOf(
-        ParameterSpec("low", "Low", -12f..12f, 0f, "dB", 0), ParameterSpec("mid", "Mid", -12f..12f, 0f, "dB", 1), ParameterSpec("high", "High", -12f..12f, 0f, "dB", 2))),
+    EQ("Parametric EQ", "EQ", "Equalizer", Color(0xFFC77DFF), 4, listOf(
+        ParameterSpec("lowcut", "Low Cut", 20f..500f, 30f, "Hz", 0),
+        ParameterSpec("low", "Low Gain", -18f..18f, 0f, "dB", 1),
+        ParameterSpec("lowfreq", "Low Frequency", 40f..500f, 120f, "Hz", 2),
+        ParameterSpec("mid", "Mid Gain", -18f..18f, 0f, "dB", 3),
+        ParameterSpec("midfreq", "Mid Frequency", 150f..6000f, 800f, "Hz", 4),
+        ParameterSpec("midq", "Mid Q", 0.2f..8f, 1f, "Q", 5),
+        ParameterSpec("high", "High Gain", -18f..18f, 0f, "dB", 6),
+        ParameterSpec("highfreq", "High Frequency", 1000f..12000f, 4200f, "Hz", 7),
+        ParameterSpec("highcut", "High Cut", 3000f..20000f, 18000f, "Hz", 8),
+        ParameterSpec("output", "Output", -18f..18f, 0f, "dB", 9))),
     CHORUS("Dimension Chorus", "CHO", "Modulation", Color(0xFF7BDFF2), 9, listOf(
-        ParameterSpec("rate", "Rate", 0.05f..8f, 1.2f, "Hz", 0), ParameterSpec("depth", "Depth", 0f..100f, 45f, "%", 1), ParameterSpec("mix", "Mix", 0f..100f, 30f, "%", 2))),
-    DELAY("Digital Delay", "DLY", "Delay", Color(0xFF40C9C6), 5, listOf(
-        ParameterSpec("time", "Time", 40f..1500f, 360f, "ms", 0), ParameterSpec("feedback", "Feedback", 0f..92f, 38f, "%", 1), ParameterSpec("mix", "Mix", 0f..100f, 28f, "%", 2))),
+        ParameterSpec("rate", "Rate", 0.05f..8f, 1.2f, "Hz", 0),
+        ParameterSpec("depth", "Depth", 0f..100f, 45f, "%", 1),
+        ParameterSpec("mix", "Mix", 0f..100f, 30f, "%", 2),
+        ParameterSpec("tone", "Tone", 0f..100f, 60f, "%", 3),
+        ParameterSpec("voices", "Voices", 1f..4f, 3f, "", 4),
+        ParameterSpec("level", "Level", -12f..12f, 0f, "dB", 5))),
+    DELAY("Layer Delay", "DLY", "Delay", Color(0xFF40C9C6), 5, listOf(
+        ParameterSpec("time", "Quarter Time", 40f..1500f, 360f, "ms", 0),
+        ParameterSpec("feedback", "Feedback", 0f..96f, 38f, "%", 1),
+        ParameterSpec("mix", "Mix", 0f..100f, 28f, "%", 2),
+        ParameterSpec("quarter", "Quarter Layer", 0f..100f, 100f, "%", 3),
+        ParameterSpec("sixteenth", "16th Layer", 0f..100f, 0f, "%", 4),
+        ParameterSpec("triplet", "Triplet Layer", 0f..100f, 0f, "%", 5),
+        ParameterSpec("character", "Tape / Digital", -100f..100f, 35f, "%", 6),
+        ParameterSpec("cutoff", "Filter Cutoff", 250f..18000f, 12000f, "Hz", 7),
+        ParameterSpec("resonance", "Filter Resonance", 0f..100f, 10f, "%", 8),
+        ParameterSpec("modulation", "Wow / Mod", 0f..100f, 8f, "%", 9),
+        ParameterSpec("level", "Delay Level", -18f..12f, 0f, "dB", 10))),
     REVERB("Plate Reverb", "RVB", "Reverb", Color(0xFFEF6EAE), 6, listOf(
         ParameterSpec("decay", "Decay", 0.2f..12f, 2.8f, "s", 0), ParameterSpec("tone", "Tone", 0f..100f, 55f, "%", 1), ParameterSpec("mix", "Mix", 0f..100f, 22f, "%", 2))),
     OUTPUT("Output", "OUT", "I/O", Color(0xFFE0E6EC), null, listOf(ParameterSpec("level", "Level", -24f..24f, 0f, "dB"))),
