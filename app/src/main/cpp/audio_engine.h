@@ -122,8 +122,11 @@ private:
         float drivePreviousInput{0.0f};
         float driveAntiAliasState{0.0f};
         float gateEnvelope{0.0f};
+        float compressorEnvelope{0.0f};
+        float compressorGain{1.0f};
         float eqLowState{0.0f};
         float eqHighState{0.0f};
+        std::array<std::array<float, 2>, 5> pedalEqState{};
         float delaySmoothedSamples{17280.0f};
         float delayToneState{0.0f};
         size_t delayWriteIndex{0};
@@ -135,6 +138,7 @@ private:
         std::vector<float> chorusBuffer;
         size_t chorusWriteIndex{0};
         float chorusPhase{0.0f};
+        float chorusToneState{0.0f};
     };
     std::array<EffectSlot, kMaxEffectSlots> mEffectSlots;
     std::atomic<int> mEffectSlotCount{0};
@@ -215,12 +219,16 @@ private:
     size_t mIrBlockIndex{0};
     size_t mIrSpectrumIndex{0};
     float mChorusPhase{0.0f};
+    float mChorusToneState{0.0f};
     float mDrivePreviousInput{0.0f};
     float mDriveAntiAliasState{0.0f};
     float mDelaySmoothedSamples{17280.0f};
     float mDelayToneState{0.0f};
     float mEqLowState{0.0f};
     float mEqHighState{0.0f};
+    float mCompressorEnvelope{0.0f};
+    float mCompressorGain{1.0f};
+    std::array<std::array<float, 2>, 5> mPedalEqState{};
     float mGateEnvelope{0.0f};
     float mIrLowpassState{0.0f};
     float mIrHighpassState{0.0f};
