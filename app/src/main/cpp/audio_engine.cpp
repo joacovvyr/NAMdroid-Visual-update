@@ -415,9 +415,13 @@ bool AudioEngine::start() {
     }
     for (auto &slot : mEffectSlots) {
         slot.drivePreviousInput = 0.0f; slot.driveAntiAliasState = 0.0f;
+        slot.driveLowCutState = 0.0f; slot.driveLowCutPrevious = 0.0f;
+        slot.driveToneState = 0.0f;
         slot.ampEqState = {}; slot.ampLowCutState = 0.0f;
         slot.ampHighCutState = 0.0f; slot.ampLowCutPrevious = 0.0f;
-        slot.gateEnvelope = 0.0f; slot.compressorEnvelope = 0.0f;
+        slot.gateEnvelope = 0.0f; slot.gateGain = 0.0f;
+        slot.gateHoldFrames = 0; slot.gateOpen = false;
+        slot.compressorEnvelope = 0.0f;
         slot.compressorGain = 1.0f; slot.eqLowState = 0.0f; slot.eqHighState = 0.0f;
         slot.pedalEqState = {};
         slot.delaySmoothedSamples = mSampleRate.load() * 0.36f;
@@ -447,6 +451,9 @@ bool AudioEngine::start() {
     mChorusToneState = 0.0f;
     mDrivePreviousInput = 0.0f;
     mDriveAntiAliasState = 0.0f;
+    mDriveLowCutState = 0.0f;
+    mDriveLowCutPrevious = 0.0f;
+    mDriveToneState = 0.0f;
     mDelaySmoothedSamples = mSampleRate.load() * 0.36f;
     mDelayToneState = 0.0f;
     mDelayFilterState = {};
@@ -456,6 +463,10 @@ bool AudioEngine::start() {
     mCompressorEnvelope = 0.0f;
     mCompressorGain = 1.0f;
     mPedalEqState = {};
+    mGateEnvelope = 0.0f;
+    mGateGain = 0.0f;
+    mGateHoldFrames = 0;
+    mGateOpen = false;
     mSmoothedInputGain = mInputGainLinear.load();
     mSmoothedOutputGain = mOutputGainLinear.load();
 
@@ -615,10 +626,46 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *,
         const int effect = instance ? instance->type.load() : mEffectOrder[slotIndex].load();
         if (instance ? !instance->enabled.load() : !mEffectEnabled[effect].load()) continue;
         const auto parameter = [&](int index) {
-            return instance ? instance->params[index].load() :
-                (index < 3 ? mEffectParams[effect][index].load() : 0.0f);
+            if (instance) return instance->params[index].load();
+            // Compatibilidad con la API anterior de tres parametros. La UI
+            // moderna siempre usa slots, pero estos defaults evitan cambiar
+            // el sonido si un cliente JNI antiguo configura el motor.
+            if (effect == 4) {
+                const std::array<float, 10> defaults{30.0f, mEffectParams[4][0].load(), 120.0f,
+                    mEffectParams[4][1].load(), 800.0f, 1.0f, mEffectParams[4][2].load(),
+                    4200.0f, 18000.0f, 0.0f};
+                return index < static_cast<int>(defaults.size()) ? defaults[index] : 0.0f;
+            }
+            if (effect == 8) {
+                const std::array<float, 7> defaults{mEffectParams[8][0].load(),
+                    mEffectParams[8][1].load(), 12.0f, 180.0f, 6.0f,
+                    mEffectParams[8][2].load(), 100.0f};
+                return index < static_cast<int>(defaults.size()) ? defaults[index] : 0.0f;
+            }
+            if (index < 3) return mEffectParams[effect][index].load();
+            if (effect == 1) {
+                const std::array<float, 4> defaults{2.0f, 60.0f, 80.0f, 6.0f};
+                return index < 6 ? defaults[index - 2] : 0.0f;
+            }
+            if (effect == 2) {
+                const std::array<float, 4> defaults{90.0f, 35.0f, 100.0f, 0.0f};
+                return index < 7 ? defaults[index - 3] : 0.0f;
+            }
+            if (effect == 5) {
+                const std::array<float, 8> defaults{100.0f, 0.0f, 0.0f, 35.0f,
+                    12000.0f, 10.0f, 8.0f, 0.0f};
+                return index < 11 ? defaults[index - 3] : 0.0f;
+            }
+            if (effect == 9) {
+                const std::array<float, 3> defaults{60.0f, 3.0f, 0.0f};
+                return index < 6 ? defaults[index - 3] : 0.0f;
+            }
+            return 0.0f;
         };
         float &gateEnvelope = instance ? instance->gateEnvelope : mGateEnvelope;
+        float &gateGain = instance ? instance->gateGain : mGateGain;
+        int32_t &gateHoldFrames = instance ? instance->gateHoldFrames : mGateHoldFrames;
+        bool &gateOpen = instance ? instance->gateOpen : mGateOpen;
         float &compressorEnvelope = instance ? instance->compressorEnvelope : mCompressorEnvelope;
         float &compressorGain = instance ? instance->compressorGain : mCompressorGain;
         float &eqLowState = instance ? instance->eqLowState : mEqLowState;
@@ -626,6 +673,9 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *,
         auto &pedalEqState = instance ? instance->pedalEqState : mPedalEqState;
         float &drivePreviousInput = instance ? instance->drivePreviousInput : mDrivePreviousInput;
         float &driveAntiAliasState = instance ? instance->driveAntiAliasState : mDriveAntiAliasState;
+        float &driveLowCutState = instance ? instance->driveLowCutState : mDriveLowCutState;
+        float &driveLowCutPrevious = instance ? instance->driveLowCutPrevious : mDriveLowCutPrevious;
+        float &driveToneState = instance ? instance->driveToneState : mDriveToneState;
         auto &delayBuffer = instance ? instance->delayBuffer : mDelayBuffer;
         size_t &delayWriteIndex = instance ? instance->delayWriteIndex : mDelayWriteIndex;
         float &delaySmoothedSamples = instance ? instance->delaySmoothedSamples : mDelaySmoothedSamples;
@@ -643,34 +693,66 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *,
 
         if (effect == 1) {
             const float threshold = dbToLinear(parameter(0));
-            const float release = std::max(parameter(1), 20.0f);
-            const float releaseCoeff = std::exp(-1.0f / (0.001f * release * mSampleRate.load()));
+            const float closeThreshold = dbToLinear(parameter(0) - std::clamp(parameter(5), 0.0f, 18.0f));
+            const float release = std::clamp(parameter(1), 20.0f, 1000.0f);
+            const float attack = std::clamp(parameter(2), 0.1f, 25.0f);
+            const int32_t holdFrames = static_cast<int32_t>(
+                std::clamp(parameter(3), 0.0f, 500.0f) * 0.001f * mSampleRate.load());
+            const float closedGain = dbToLinear(-std::clamp(parameter(4), 10.0f, 100.0f));
+            const float detectorAttack = std::exp(-1.0f / (0.001f * 1.0f * mSampleRate.load()));
+            const float detectorRelease = std::exp(-1.0f / (0.001f * 35.0f * mSampleRate.load()));
+            const float openCoeff = std::exp(-1.0f / (0.001f * attack * mSampleRate.load()));
+            const float closeCoeff = std::exp(-1.0f / (0.001f * release * mSampleRate.load()));
             for (int32_t i = 0; i < frames; ++i) {
                 const float level = std::abs(mMonoResult[i]);
-                const float target = level >= threshold ? 1.0f : 0.0f;
-                gateEnvelope = target > gateEnvelope ? target : gateEnvelope * releaseCoeff;
-                mMonoResult[i] *= gateEnvelope;
+                const float detectorCoeff = level > gateEnvelope ? detectorAttack : detectorRelease;
+                gateEnvelope = detectorCoeff * gateEnvelope + (1.0f - detectorCoeff) * level;
+                if (!gateOpen && gateEnvelope >= threshold) {
+                    gateOpen = true;
+                    gateHoldFrames = holdFrames;
+                } else if (gateOpen) {
+                    if (gateEnvelope >= closeThreshold) gateHoldFrames = holdFrames;
+                    else if (gateHoldFrames > 0) --gateHoldFrames;
+                    else gateOpen = false;
+                }
+                const float target = gateOpen ? 1.0f : closedGain;
+                const float smoothingCoeff = target > gateGain ? openCoeff : closeCoeff;
+                gateGain = smoothingCoeff * gateGain + (1.0f - smoothingCoeff) * target;
+                mMonoResult[i] *= gateGain;
             }
         } else if (effect == 2) {
             const float drive = 1.0f + std::clamp(parameter(0) / 100.0f, 0.0f, 1.0f) * 24.0f;
             const float tone = std::clamp(parameter(1) / 100.0f, 0.0f, 1.0f);
             const float level = dbToLinear(parameter(2));
+            const float tightHz = std::clamp(parameter(3), 20.0f, 650.0f);
+            const float character = std::clamp(parameter(4) / 100.0f, 0.0f, 1.0f);
+            const float mix = std::clamp(parameter(5) / 100.0f, 0.0f, 1.0f);
+            const float bias = std::clamp(parameter(6) / 100.0f, -0.5f, 0.5f);
             const float norm = std::max(std::tanh(drive), 1e-4f);
+            const float hpCoeff = std::exp(-6.2831853f * tightHz / mSampleRate.load());
+            const float toneHz = 650.0f + tone * 9500.0f;
+            const float toneCoeff = 1.0f - std::exp(-6.2831853f * toneHz / mSampleRate.load());
             for (int32_t i = 0; i < frames; ++i) {
                 const float input = mMonoResult[i];
+                driveLowCutState = hpCoeff * (driveLowCutState + input - driveLowCutPrevious);
+                driveLowCutPrevious = input;
                 float accumulated = 0.0f;
                 // 4x oversampling por interpolacion reduce aliasing de la
                 // saturacion sin reservar buffers adicionales.
                 for (int phase = 1; phase <= 4; ++phase) {
                     const float oversampled = drivePreviousInput +
-                        (input - drivePreviousInput) * (phase * 0.25f);
-                    const float shaped = std::tanh(oversampled * drive) / norm;
+                        (driveLowCutState - drivePreviousInput) * (phase * 0.25f);
+                    const float soft = std::tanh((oversampled + bias) * drive) / norm;
+                    const float hard = std::clamp((oversampled + bias * 0.65f) * drive * 0.45f, -1.0f, 1.0f);
+                    const float shaped = soft * (1.0f - character) + hard * character;
                     driveAntiAliasState += 0.45f * (shaped - driveAntiAliasState);
                     accumulated += driveAntiAliasState;
                 }
-                drivePreviousInput = input;
+                drivePreviousInput = driveLowCutState;
                 const float clipped = accumulated * 0.25f;
-                mMonoResult[i] = (clipped * (0.65f + tone * 0.35f) + input * (0.35f - tone * 0.25f)) * level;
+                driveToneState += toneCoeff * (clipped - driveToneState);
+                const float wet = driveToneState * (0.78f + tone * 0.22f);
+                mMonoResult[i] = (input * (1.0f - mix) + wet * mix) * level;
             }
         } else if (effect == 3 && !bypass) {
             const float sampleRate = std::max(mSampleRate.load(), 1);
