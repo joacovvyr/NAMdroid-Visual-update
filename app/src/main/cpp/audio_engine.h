@@ -106,10 +106,10 @@ private:
     std::atomic<bool> mBypass{false};
     // IDs: 1 gate, 2 drive, 3 NAM, 4 EQ, 5 delay, 6 reverb,
     // 7 IR cabinet, 8 compressor, 9 chorus, 10 wah, 11 auto-wah,
-    // 12 tremolo, 13 pitch.
-    std::array<std::atomic<bool>, 14> mEffectEnabled{};
-    std::array<std::atomic<float>, 14> mEffectAmount{};
-    std::array<std::array<std::atomic<float>, 3>, 14> mEffectParams{};
+    // 12 tremolo, 13 expression pitch, 14 drop detune.
+    std::array<std::atomic<bool>, 15> mEffectEnabled{};
+    std::array<std::atomic<float>, 15> mEffectAmount{};
+    std::array<std::array<std::atomic<float>, 3>, 15> mEffectParams{};
     std::array<std::atomic<int>, 9> mEffectOrder{};
     std::atomic<int> mEffectCount{9};
     struct EffectSlot {
