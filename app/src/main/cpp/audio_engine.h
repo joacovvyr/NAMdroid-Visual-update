@@ -105,10 +105,11 @@ private:
     std::atomic<float> mOutputGainLinear{1.0f};
     std::atomic<bool> mBypass{false};
     // IDs: 1 gate, 2 drive, 3 NAM, 4 EQ, 5 delay, 6 reverb,
-    // 7 IR cabinet, 8 compressor, 9 chorus.
-    std::array<std::atomic<bool>, 10> mEffectEnabled{};
-    std::array<std::atomic<float>, 10> mEffectAmount{};
-    std::array<std::array<std::atomic<float>, 3>, 10> mEffectParams{};
+    // 7 IR cabinet, 8 compressor, 9 chorus, 10 wah, 11 auto-wah,
+    // 12 tremolo, 13 pitch.
+    std::array<std::atomic<bool>, 14> mEffectEnabled{};
+    std::array<std::atomic<float>, 14> mEffectAmount{};
+    std::array<std::array<std::atomic<float>, 3>, 14> mEffectParams{};
     std::array<std::atomic<int>, 9> mEffectOrder{};
     std::atomic<int> mEffectCount{9};
     struct EffectSlot {
@@ -147,6 +148,13 @@ private:
         size_t chorusWriteIndex{0};
         float chorusPhase{0.0f};
         float chorusToneState{0.0f};
+        std::array<float, 2> wahState{};
+        float autoWahEnvelope{0.0f};
+        float tremoloPhase{0.0f};
+        std::vector<float> pitchBuffer;
+        size_t pitchWriteIndex{0};
+        float pitchPhase{0.0f};
+        float pitchToneState{0.0f};
     };
     std::array<EffectSlot, kMaxEffectSlots> mEffectSlots;
     std::atomic<int> mEffectSlotCount{0};
@@ -228,6 +236,13 @@ private:
     size_t mIrSpectrumIndex{0};
     float mChorusPhase{0.0f};
     float mChorusToneState{0.0f};
+    std::array<float, 2> mWahState{};
+    float mAutoWahEnvelope{0.0f};
+    float mTremoloPhase{0.0f};
+    std::vector<float> mPitchBuffer;
+    size_t mPitchWriteIndex{0};
+    float mPitchPhase{0.0f};
+    float mPitchToneState{0.0f};
     float mDrivePreviousInput{0.0f};
     float mDriveAntiAliasState{0.0f};
     float mDriveLowCutState{0.0f};
