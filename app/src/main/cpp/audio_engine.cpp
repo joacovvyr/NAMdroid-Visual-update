@@ -105,14 +105,14 @@ void AudioEngine::analyseTunerBuffer(
 }
 
 void AudioEngine::setEffectEnabled(int effectId, bool enabled) {
-    if (effectId >= 1 && effectId <= 13) {
+    if (effectId >= 1 && effectId <= 14) {
         const bool changed = mEffectEnabled[effectId].exchange(enabled) != enabled;
         if (changed) requestCrossfade();
     }
 }
 
 void AudioEngine::setEffectAmount(int effectId, float amount) {
-    if (effectId >= 1 && effectId <= 13) {
+    if (effectId >= 1 && effectId <= 14) {
         mEffectAmount[effectId].store(std::clamp(amount, 0.0f, 1.0f));
     }
 }
@@ -129,7 +129,7 @@ void AudioEngine::setEffectOrder(const int *order, int count) {
 }
 
 void AudioEngine::setEffectParam(int effectId, int param, float value) {
-    if (effectId >= 1 && effectId <= 13 && param >= 0 && param < 3) mEffectParams[effectId][param].store(value);
+    if (effectId >= 1 && effectId <= 14 && param >= 0 && param < 3) mEffectParams[effectId][param].store(value);
 }
 
 void AudioEngine::setEffectChain(const int *types, const bool *enabled,
@@ -138,7 +138,7 @@ void AudioEngine::setEffectChain(const int *types, const bool *enabled,
     bool structuralChange = mEffectSlotCount.load(std::memory_order_acquire) != count;
     for (int slot = 0; slot < count; ++slot) {
         auto &target = mEffectSlots[slot];
-        const int newType = std::clamp(types[slot], 1, 13);
+        const int newType = std::clamp(types[slot], 1, 14);
         structuralChange = structuralChange || target.type.load() != newType ||
             target.enabled.load() != enabled[slot];
         target.type.store(newType, std::memory_order_relaxed);
@@ -1082,15 +1082,24 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *,
                 tremoloPhase += 6.2831853f * rate / mSampleRate.load();
                 if (tremoloPhase >= 6.2831853f) tremoloPhase -= 6.2831853f;
             }
-        } else if (effect == 13 && pitchBuffer.size() > 4) {
-            const float semitones = std::clamp(parameter(0) + parameter(1) / 100.0f, -12.0f, 12.0f);
+        } else if ((effect == 13 || effect == 14) && pitchBuffer.size() > 4) {
+            // DETUNE emula el selector discreto de un pedal Drop: 0, -1…-7 y
+            // octava. PITCH conserva su recorrido continuo y fine tuning.
+            const float selectedDrop = std::round(std::clamp(parameter(0), 0.0f, 8.0f));
+            const float detuneSemitones = selectedDrop >= 8.0f ? -12.0f : -selectedDrop;
+            const float semitones = effect == 14 ? detuneSemitones :
+                std::clamp(parameter(0) + parameter(1) / 100.0f, -12.0f, 12.0f);
             if (std::abs(semitones) < 0.001f) continue;
             const float ratio = std::pow(2.0f, semitones / 12.0f);
-            const float mix = std::clamp(parameter(2) / 100.0f, 0.0f, 1.0f);
-            const float window = std::clamp(parameter(3) * 0.001f * mSampleRate.load(),
+            const int mixParam = effect == 14 ? 1 : 2;
+            const int windowParam = effect == 14 ? 2 : 3;
+            const int toneParam = effect == 14 ? 3 : 4;
+            const int levelParam = effect == 14 ? 4 : 5;
+            const float mix = std::clamp(parameter(mixParam) / 100.0f, 0.0f, 1.0f);
+            const float window = std::clamp(parameter(windowParam) * 0.001f * mSampleRate.load(),
                 128.0f, static_cast<float>(pitchBuffer.size() - 2));
-            const float tone = std::clamp(parameter(4) / 100.0f, 0.0f, 1.0f);
-            const float level = dbToLinear(parameter(5));
+            const float tone = std::clamp(parameter(toneParam) / 100.0f, 0.0f, 1.0f);
+            const float level = dbToLinear(parameter(levelParam));
             const float phaseIncrement = (1.0f - ratio) / window;
             const float toneHz = 1200.0f + tone * 12500.0f;
             const float toneCoeff = 1.0f - std::exp(-6.2831853f * toneHz / mSampleRate.load());
