@@ -77,6 +77,30 @@ fun StageWorkbench(
     var confirmDelete by remember { mutableStateOf(false) }
     val selected = blocks.firstOrNull { it.id == selectedId }
 
+    // AMP-DROID uses a fixed-ratio compositor so every interactive layer
+    // stays registered to the approved amplifier artwork on every screen.
+    if (editing && selected?.type == BlockType.AMP) {
+        BackHandler(foreground) { onCloseEditor() }
+        Box(Modifier.fillMaxSize().background(StageBlack).safeDrawingPadding()) {
+            AmpDroidEditor(
+                Modifier.fillMaxSize(),
+                selected,
+                onParameter,
+                { onToggleBlock(selected.id) },
+                onTone,
+                onPickNam,
+            )
+            IconButton(
+                onCloseEditor,
+                Modifier.align(Alignment.TopStart).zIndex(5f)
+                    .background(Color.Black.copy(alpha = .42f), CircleShape),
+            ) {
+                Icon(Icons.Default.ArrowBack, "Volver a la cadena", tint = Color.White)
+            }
+        }
+        return
+    }
+
     // Full-screen pedal editors are a separate navigation surface. They must
     // never inherit the measurement constraints of the legacy split editor.
     if (editing && selected?.type == BlockType.DELAY) {
@@ -419,6 +443,238 @@ fun StageWorkbench(
             LazyVerticalGrid(columns = GridCells.Adaptive(170.dp), modifier = Modifier.weight(.64f).fillMaxHeight(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 8.dp)) {
                 items(block.type.parameters, key = { it.key }) { spec -> StageParameter(block.id, spec, block.parameters[spec.key] ?: spec.default, block.type.color) { change(spec, it) } }
             }
+        }
+    }
+}
+
+@Composable
+private fun AmpDroidEditor(
+    modifier: Modifier,
+    block: PedalBlock,
+    change: (ParameterSpec, Float) -> Unit,
+    toggle: () -> Unit,
+    tone: () -> Unit,
+    pickNam: () -> Unit,
+) {
+    val specs = remember(block.type) { block.type.parameters.associateBy { it.key } }
+    val controls = remember(specs) {
+        listOf(
+            "input" to "DRIVE",
+            "bass" to "BASS",
+            "mid" to "MID",
+            "midfreq" to "MID FREQ",
+            "midq" to "MID Q",
+            "treble" to "TREBLE",
+            "presence" to "PRESENCE",
+            "resonance" to "RESONANCE",
+            "lowcut" to "LOW CUT",
+            "highcut" to "HIGH CUT",
+            "output" to "OUTPUT",
+        ).mapNotNull { (key, label) -> specs[key]?.let { Triple(key, label, it) } }
+    }
+    val centers = remember {
+        listOf(.1066f, .1862f, .2658f, .3459f, .4255f, .5051f, .5852f, .6648f, .7444f, .8240f, .9036f)
+    }
+    val pulse = rememberInfiniteTransition(label = "amp-led").animateFloat(
+        initialValue = .38f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            tween(620, easing = FastOutSlowInEasing),
+            RepeatMode.Reverse,
+        ),
+        label = "amp-led-alpha",
+    ).value
+    val switchDepth by animateFloatAsState(
+        if (block.enabled) 3f else 0f,
+        spring(stiffness = Spring.StiffnessMedium),
+        label = "amp-switch-depth",
+    )
+
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Image(
+            painterResource(R.drawable.pedal_editor_background),
+            null,
+            Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop,
+        )
+        BoxWithConstraints(
+            Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 10.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            val ampRatio = 1960f / 1028f
+            val ampWidth = minOf(maxWidth, maxHeight * ampRatio)
+            val ampHeight = ampWidth / ampRatio
+            val controlWidth = ampWidth * .078f
+            val controlHeight = ampHeight * .245f
+
+            Box(Modifier.size(ampWidth, ampHeight)) {
+                Image(
+                    painterResource(R.drawable.amp_droid_base),
+                    null,
+                    Modifier.fillMaxSize(),
+                    contentScale = ContentScale.FillBounds,
+                )
+
+                controls.forEachIndexed { index, (key, label, spec) ->
+                    AmpFrontKnob(
+                        spec = spec,
+                        label = label,
+                        value = block.parameters[key] ?: spec.default,
+                        change = change,
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .offset(
+                                x = ampWidth * centers[index] - controlWidth / 2f,
+                                y = ampHeight * .135f,
+                            )
+                            .size(controlWidth, controlHeight),
+                    )
+                }
+
+                Surface(
+                    onClick = pickNam,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .offset(x = ampWidth * .342f, y = ampHeight * .365f)
+                        .size(ampWidth * .329f, ampHeight * .095f),
+                    color = Color(0xDD05090C),
+                    shape = RoundedCornerShape(5.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF27DCE8)),
+                ) {
+                    Column(
+                        Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        Text(
+                            block.assetName?.takeIf { it.isNotBlank() } ?: "SIN MODELO CARGADO",
+                            color = Color(0xFF7FF4F8),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            "TOCAR PARA CARGAR LOCAL",
+                            color = Color.White.copy(alpha = .58f),
+                            fontSize = 6.sp,
+                            maxLines = 1,
+                        )
+                    }
+                }
+
+                Surface(
+                    onClick = tone,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .offset(x = ampWidth * .724f, y = ampHeight * .365f)
+                        .size(ampWidth * .205f, ampHeight * .095f),
+                    color = Color.Black,
+                    shape = RoundedCornerShape(5.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF27DCE8)),
+                ) {
+                    Image(
+                        painterResource(R.drawable.tone3000_official),
+                        "Abrir TONE3000",
+                        Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 5.dp),
+                        contentScale = ContentScale.Fit,
+                    )
+                }
+
+                Canvas(
+                    Modifier
+                        .align(Alignment.TopStart)
+                        .offset(x = ampWidth * .101f, y = ampHeight * .342f)
+                        .size(11.dp),
+                ) {
+                    drawCircle(Color(0xFF27E9F2).copy(alpha = if (block.enabled) pulse else .14f))
+                    if (block.enabled) {
+                        drawCircle(Color.White.copy(alpha = .75f), radius = size.minDimension * .18f)
+                    }
+                }
+
+                Box(
+                    Modifier
+                        .align(Alignment.TopStart)
+                        .offset(x = ampWidth * .076f, y = ampHeight * .378f)
+                        .size(ampWidth * .061f)
+                        .clickable(onClick = toggle),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Image(
+                        painterResource(R.drawable.delay_footswitch_base),
+                        null,
+                        Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Fit,
+                    )
+                    Image(
+                        painterResource(R.drawable.delay_footswitch_cap),
+                        "Activar o desactivar amplificador",
+                        Modifier.fillMaxSize().graphicsLayer {
+                            translationY = switchDepth
+                            scaleX = if (block.enabled) .97f else 1f
+                            scaleY = if (block.enabled) .97f else 1f
+                        },
+                        contentScale = ContentScale.Fit,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AmpFrontKnob(
+    spec: ParameterSpec,
+    label: String,
+    value: Float,
+    change: (ParameterSpec, Float) -> Unit,
+    modifier: Modifier,
+) {
+    val currentValue by rememberUpdatedState(value)
+    val fraction = ((value - spec.range.start) /
+        (spec.range.endInclusive - spec.range.start)).coerceIn(0f, 1f)
+
+    BoxWithConstraints(modifier, contentAlignment = Alignment.TopCenter) {
+        val knobSize = minOf(maxWidth * .76f, maxHeight * .53f)
+        Column(
+            Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            MasterKnob(
+                fraction,
+                Color(0xFF27DCE8),
+                Modifier
+                    .size(knobSize)
+                    .pointerInput(spec.key) {
+                        detectVerticalDragGestures { event, amount ->
+                            event.consume()
+                            change(
+                                spec,
+                                (currentValue - amount / 210.dp.toPx() *
+                                    (spec.range.endInclusive - spec.range.start))
+                                    .coerceIn(spec.range),
+                            )
+                        }
+                    },
+                2.4f,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                label,
+                color = Color.White,
+                fontSize = 7.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                "${"%.1f".format(value)} ${spec.unit}",
+                color = Color(0xFF48E8EE),
+                fontSize = 7.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
