@@ -56,6 +56,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -66,6 +67,8 @@ import com.namdroid.app.R
 import kotlin.math.roundToInt
 
 // Shared geometry keeps every non-expression effect aligned across screen sizes.
+private val DroidTitleFont = FontFamily(Font(R.font.droid_wordmark, FontWeight.Bold))
+
 private data class DroidStyle(val title: String, val body: Color, val accent: Color)
 
 private fun styleFor(type: BlockType) = when (type) {
@@ -172,17 +175,11 @@ internal fun StandardDroidEditor(
                         }, contentScale = ContentScale.Fit,
                     )
                 }
-                Text(
+                DroidWordmark(
                     style.title,
                     Modifier.align(Alignment.TopCenter)
                         .offset(y = pedalHeight * .765f).fillMaxWidth(.62f),
-                    color = Color.White,
-                    fontSize = if (style.title.length > 13) 22.sp else 27.sp,
-                    fontWeight = FontWeight.Black,
-                    fontFamily = FontFamily.SansSerif,
-                    letterSpacing = 1.3.sp,
-                    textAlign = TextAlign.Center,
-                    maxLines = 1,
+                    if (style.title.length > 13) 22.sp else 27.sp,
                 )
             }
         }
@@ -397,14 +394,32 @@ internal fun CabDroidEditor(
                     Image(painterResource(R.drawable.delay_footswitch_cap), "Activar o desactivar cabinet",
                         Modifier.fillMaxSize().graphicsLayer { translationY = switchDepth }, contentScale = ContentScale.Fit)
                 }
-                Text(
-                    "CAB-DROID", Modifier.align(Alignment.TopCenter).offset(y = height * .79f).fillMaxWidth(.46f),
-                    color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.Black, letterSpacing = 1.3.sp,
-                    textAlign = TextAlign.Center, maxLines = 1,
+                DroidWordmark(
+                    "CAB-DROID", Modifier.align(Alignment.TopCenter).offset(y = height * .79f).fillMaxWidth(.46f), 27.sp,
                 )
             }
         }
     }
+}
+
+@Composable
+internal fun DroidWordmark(
+    text: String,
+    modifier: Modifier,
+    fontSize: androidx.compose.ui.unit.TextUnit,
+) {
+    Text(
+        text = text,
+        modifier = modifier,
+        color = Color.White,
+        fontSize = fontSize,
+        fontFamily = DroidTitleFont,
+        fontWeight = FontWeight.Bold,
+        letterSpacing = 1.1.sp,
+        textAlign = TextAlign.Center,
+        maxLines = 1,
+        overflow = TextOverflow.Clip,
+    )
 }
 
 private fun frontLabel(spec: ParameterSpec): String = when (spec.key) {
