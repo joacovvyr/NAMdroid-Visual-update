@@ -331,7 +331,9 @@ bool AudioEngine::start() {
                 ->setSharingMode(sharingMode)
                 ->setFormat(oboe::AudioFormat::Float)
                 ->setChannelCount(channels)
-                ->setInputPreset(oboe::InputPreset::Unprocessed);
+                ->setInputPreset(oboe::InputPreset::Unprocessed)
+                ->setDataCallback(this)
+                ->setErrorCallback(this);
             builder.setSampleRate(mOutStream->getSampleRate());
             if (mInputDeviceId.load() > 0) builder.setDeviceId(mInputDeviceId.load());
             return builder.openStream(mInStream);
@@ -401,6 +403,20 @@ bool AudioEngine::start() {
     mMonoResult.assign(kMaxBufferFrames, 0.0f);
     mInterleavedScratch.assign(
         kMaxBufferFrames * std::max({mInChannelCount.load(), mOutChannelCount.load(), 2}), 0.0f);
+    mInputRing.fill(0.0f);
+    mInputRingRead.store(0, std::memory_order_relaxed);
+    mInputRingWrite.store(0, std::memory_order_relaxed);
+    mLastInputSample = 0.0f;
+    mInputRecoveryGain = 0.0f;
+    mCallbackCounter = 0;
+    mGainSmoothingCoefficient = 1.0f - std::exp(
+        -1.0f / (0.010f * std::max(mSampleRate.load(), 1)));
+    const int32_t framesPerBurst = std::max(mOutStream->getFramesPerBurst(), 64);
+    mInputTargetFrames.store(framesPerBurst, std::memory_order_relaxed);
+    // Dos bursts de salida absorben jitter del scheduler sin convertir la
+    // app en una ruta de alta latencia.
+    auto tunedBuffer = mOutStream->setBufferSizeInFrames(framesPerBurst * 2);
+    if (tunedBuffer) mBufferSizeFrames.store(tunedBuffer.value());
     mDelayBuffer.assign(std::max(mSampleRate.load() * 2, 1), 0.0f);
     mReverbBuffer.assign(std::max(mSampleRate.load() / 2, 1), 0.0f);
     const std::array<float, 4> combTimes{0.0297f, 0.0371f, 0.0411f, 0.0437f};
@@ -488,6 +504,16 @@ bool AudioEngine::start() {
         return false;
     }
 
+    // Darle a la entrada como maximo un burst para cebar el FIFO antes de
+    // arrancar la salida evita el hueco inicial sin sumar buffers permanentes.
+    for (int attempt = 0; attempt < 12; ++attempt) {
+        const uint64_t available =
+            mInputRingWrite.load(std::memory_order_acquire) -
+            mInputRingRead.load(std::memory_order_relaxed);
+        if (available >= static_cast<uint64_t>(mInputTargetFrames.load())) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
     const oboe::Result outStart = mOutStream->requestStart();
     if (outStart != oboe::Result::OK) {
         LOGE("No se pudo arrancar salida: %s", oboe::convertToText(outStart));
@@ -545,9 +571,41 @@ bool AudioEngine::loadModel(const std::string &namFilePath, std::string &outErro
     }
 }
 
-oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *,
+oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *stream,
                                                     void *audioData, int32_t numFrames) {
-    const auto callbackStarted = std::chrono::steady_clock::now();
+    // La entrada tiene su propio callback de tiempo real. Solo publica
+    // muestras mono en el FIFO SPSC; nunca bloquea, reserva memoria ni toca DSP.
+    if (stream && stream->getDirection() == oboe::Direction::Input) {
+        const auto *input = static_cast<const float *>(audioData);
+        const int32_t channels = std::max(stream->getChannelCount(), 1);
+        const int32_t channelMode = mInputChannelMode.load(std::memory_order_relaxed);
+        uint64_t write = mInputRingWrite.load(std::memory_order_relaxed);
+        const uint64_t read = mInputRingRead.load(std::memory_order_acquire);
+        const uint64_t capacity = kInputRingFrames - 1;
+        for (int32_t frame = 0; frame < numFrames && write - read < capacity; ++frame) {
+            float sample = 0.0f;
+            if (channels == 1) {
+                sample = input[frame];
+            } else if (channelMode > 0) {
+                const int32_t selected = std::min(channelMode - 1, channels - 1);
+                sample = input[frame * channels + selected];
+            } else {
+                for (int32_t channel = 0; channel < channels; ++channel) {
+                    sample += input[frame * channels + channel];
+                }
+                sample /= static_cast<float>(channels);
+            }
+            mInputRing[write & kInputRingMask] = sample;
+            ++write;
+        }
+        mInputRingWrite.store(write, std::memory_order_release);
+        return oboe::DataCallbackResult::Continue;
+    }
+
+    const bool sampleTelemetry = (++mCallbackCounter & 0x0F) == 0;
+    const auto callbackStarted = sampleTelemetry
+        ? std::chrono::steady_clock::now()
+        : std::chrono::steady_clock::time_point{};
     auto *output = static_cast<float *>(audioData);
 
     // Nunca alocar en el callback de audio: si por lo que sea nos piden mas
@@ -562,38 +620,44 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *,
     const int32_t inChannels = std::max(mInChannelCount.load(), 1);
     const int32_t outChannels = std::max(mOutChannelCount.load(), 1);
 
-    // Lectura de entrada. En interfaces multicanal el usuario puede conservar
-    // el downmix o elegir explicitamente CH1/CH2 para no sumar ruido del otro jack.
-    int32_t framesRead = 0;
-    if (mInStream) {
-        if (inChannels <= 1) {
-            auto readResult = mInStream->read(mInputBuffer.data(), frames, 0);
-            if (readResult) framesRead = readResult.value();
-        } else {
-            auto readResult = mInStream->read(mInterleavedScratch.data(), frames, 0);
-            if (readResult) {
-                framesRead = readResult.value();
-                const int32_t channelMode = mInputChannelMode.load();
-                for (int32_t i = 0; i < framesRead; ++i) {
-                    if (channelMode > 0) {
-                        const int32_t selected = std::min(channelMode - 1, inChannels - 1);
-                        mInputBuffer[i] = mInterleavedScratch[i * inChannels + selected];
-                    } else {
-                        float sum = 0.0f;
-                        for (int32_t ch = 0; ch < inChannels; ++ch) sum += mInterleavedScratch[i * inChannels + ch];
-                        mInputBuffer[i] = sum / static_cast<float>(inChannels);
-                    }
-                }
-            }
-        }
+    // Consumir la entrada ya preparada por el callback productor.
+    uint64_t read = mInputRingRead.load(std::memory_order_relaxed);
+    const uint64_t write = mInputRingWrite.load(std::memory_order_acquire);
+    uint64_t available = write - read;
+    const uint64_t target = static_cast<uint64_t>(
+        std::max(mInputTargetFrames.load(std::memory_order_relaxed), 1));
+
+    // Si dos relojes de hardware derivan, soltar solo el exceso conserva la
+    // latencia acotada. El crossfade de recuperacion evita un salto duro.
+    if (available > target * 5) {
+        const uint64_t excess = available - target * 2;
+        read += excess;
+        available -= excess;
+        mInputRecoveryGain = 0.0f;
     }
-    // Si todavia no hay suficientes frames (arranque en frio), rellenamos con
-    // silencio para no trabarnos.
-    for (int32_t i = framesRead; i < frames; ++i) mInputBuffer[i] = 0.0f;
+
+    const int32_t framesRead = static_cast<int32_t>(
+        std::min<uint64_t>(available, static_cast<uint64_t>(frames)));
+    for (int32_t i = 0; i < framesRead; ++i) {
+        const float sample = mInputRing[read & kInputRingMask];
+        ++read;
+        mInputRecoveryGain = std::min(1.0f, mInputRecoveryGain + 1.0f / 48.0f);
+        mLastInputSample = sample;
+        mInputBuffer[i] = sample * mInputRecoveryGain;
+    }
+    if (framesRead < frames) {
+        mInputUnderflowCount.fetch_add(1, std::memory_order_relaxed);
+        for (int32_t i = framesRead; i < frames; ++i) {
+            mInputRecoveryGain = std::max(0.0f, mInputRecoveryGain - 1.0f / 32.0f);
+            mInputBuffer[i] = mLastInputSample * mInputRecoveryGain;
+        }
+        if (mInputRecoveryGain <= 0.0f) mLastInputSample = 0.0f;
+    }
+    mInputRingRead.store(read, std::memory_order_release);
 
     const float inputTarget = mInputGainLinear.load();
     const float outputTarget = mOutputGainLinear.load();
-    const float smoothing = 1.0f - std::exp(-1.0f / (0.010f * std::max(mSampleRate.load(), 1)));
+    const float smoothing = mGainSmoothingCoefficient;
     const bool bypass = mBypass.load();
 
     float inputSquares = 0.0f;
@@ -1271,13 +1335,24 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *,
         for (int32_t ch = 0; ch < outChannels; ++ch) output[i * outChannels + ch] = 0.0f;
     }
 
-    if (mOutStream) {
-        auto xruns = mOutStream->getXRunCount();
-        if (xruns) mXRunCount.store(xruns.value());
+    if (sampleTelemetry) {
+        if (mOutStream) {
+            auto xruns = mOutStream->getXRunCount();
+            if (xruns) {
+                mXRunCount.store(
+                    xruns.value() + static_cast<int32_t>(
+                        mInputUnderflowCount.load(std::memory_order_relaxed)));
+            }
+        }
+        const auto elapsed = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - callbackStarted).count();
+        const double budget = static_cast<double>(std::max(frames, 1)) /
+            std::max(mSampleRate.load(), 1);
+        const double measured = std::clamp(elapsed / budget * 100.0, 0.0, 999.0);
+        const double previous = mLastLoadPercent.load(std::memory_order_relaxed);
+        mLastLoadPercent.store(previous * 0.8 + measured * 0.2,
+            std::memory_order_relaxed);
     }
-    const auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - callbackStarted).count();
-    const double budget = static_cast<double>(std::max(frames, 1)) / std::max(mSampleRate.load(), 1);
-    mLastLoadPercent.store(std::clamp(elapsed / budget * 100.0, 0.0, 999.0));
     return oboe::DataCallbackResult::Continue;
 }
 
