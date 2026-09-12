@@ -1,13 +1,17 @@
 name: Build NAMDroid APK
 
-# Se ejecuta automaticamente al hacer push, y tambien se puede lanzar a mano
-# desde la pestaña "Actions" del repo con el boton "Run workflow".
 on:
   push:
-    branches: [ "**" ]
+    branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
   workflow_dispatch: {}
+
+# One build per branch/PR. New commits cancel obsolete native builds instead of
+# consuming a second runner for the same APK.
+concurrency:
+  group: namdroid-build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
