@@ -525,7 +525,7 @@ private fun AmpDroidEditor(
                             .align(Alignment.TopStart)
                             .offset(
                                 x = ampWidth * centers[index] - controlWidth / 2f,
-                                y = ampHeight * .135f,
+                                y = ampHeight * .180f,
                             )
                             .size(controlWidth, controlHeight),
                     )
@@ -641,6 +641,14 @@ private fun AmpFrontKnob(
             Modifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
+            Text(
+                "${"%.1f".format(value)} ${spec.unit}",
+                color = Color(0xFF48E8EE),
+                fontSize = 7.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(2.dp))
             MasterKnob(
                 fraction,
                 Color(0xFF27DCE8),
@@ -665,13 +673,6 @@ private fun AmpFrontKnob(
                 color = Color.White,
                 fontSize = 7.sp,
                 fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                "${"%.1f".format(value)} ${spec.unit}",
-                color = Color(0xFF48E8EE),
-                fontSize = 7.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
