@@ -896,7 +896,7 @@ private fun ReverbDroidEditor(
                         modifier = Modifier
                             .align(Alignment.CenterStart)
                             .padding(start = pedalWidth * .075f)
-                            .offset(y = pedalHeight * .115f)
+                            .offset(y = pedalHeight * .195f)
                             .width(pedalWidth * .58f)
                             .height(pedalHeight * .23f),
                     )
