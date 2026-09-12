@@ -922,17 +922,60 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *,
             }
         } else if (effect == 6 && !reverbCombs[0].empty()) {
             const float decay = std::clamp(parameter(0), 0.2f, 12.0f);
-            const float feedback = std::clamp(0.35f + decay / 20.0f, 0.35f, 0.93f);
             const float tone = std::clamp(parameter(1) / 100.0f, 0.0f, 1.0f);
             const float mix = std::clamp(parameter(2) / 100.0f, 0.0f, 1.0f);
+            const int mode = std::clamp(
+                static_cast<int>(std::round(parameter(3))), 0, 4);
+
+            // ROOM, HALL, PLATE, SHIMMER y AMBIENT comparten un tanque
+            // estable, pero cada posicion cambia tiempo aparente, absorcion,
+            // difusion, modulacion e inyeccion de octava.
+            const std::array<float, 5> decayScale{0.46f, 0.82f, 0.68f, 0.92f, 1.12f};
+            const std::array<float, 5> dampingScale{0.58f, 0.72f, 0.94f, 0.88f, 0.62f};
+            const std::array<float, 5> diffusion{0.38f, 0.54f, 0.70f, 0.62f, 0.76f};
+            const std::array<float, 5> inputSpread{1.15f, 0.92f, 0.78f, 0.72f, 0.60f};
+            const std::array<float, 5> shimmerMix{0.0f, 0.0f, 0.0f, 0.52f, 0.14f};
+            const float feedback = std::clamp(
+                0.28f + decay * 0.052f * decayScale[mode], 0.30f, 0.945f);
+            const float damping = std::clamp(
+                0.48f + tone * 0.48f * dampingScale[mode], 0.42f, 0.965f);
+            const float allpassGain = diffusion[mode];
+            const float shimmerAmount = shimmerMix[mode];
+            const float shimmerWindow = std::min<float>(
+                mSampleRate.load() * 0.050f,
+                static_cast<float>(pitchBuffer.size() - 2));
+            const float shimmerPhaseIncrement = shimmerWindow > 1.0f
+                ? -1.0f / shimmerWindow : 0.0f;
+
+            const auto shimmerGrain = [&](float phase) {
+                phase -= std::floor(phase);
+                const float delay = 1.0f + phase * shimmerWindow;
+                const size_t whole = static_cast<size_t>(delay);
+                const float fraction = delay - static_cast<float>(whole);
+                const size_t a = (pitchWriteIndex + pitchBuffer.size() - whole) %
+                    pitchBuffer.size();
+                const size_t b = (a + pitchBuffer.size() - 1) % pitchBuffer.size();
+                const float sample = pitchBuffer[a] * (1.0f - fraction) +
+                    pitchBuffer[b] * fraction;
+                const float envelope = 0.5f - 0.5f * std::cos(6.2831853f * phase);
+                return std::array<float, 2>{sample, envelope};
+            };
+
             for (int32_t i = 0; i < frames; ++i) {
                 const float dry = mMonoResult[i];
+                const float ambientMotion = mode == 4
+                    ? 1.0f + std::sin(pitchPhase * 6.2831853f) * 0.012f : 1.0f;
+                const float tankInput = dry * inputSpread[mode] +
+                    pitchToneState * shimmerAmount * 0.62f;
                 float wet = 0.0f;
                 for (size_t comb = 0; comb < reverbCombs.size(); ++comb) {
                     auto &buffer = reverbCombs[comb];
                     const size_t index = reverbCombIndices[comb];
                     const float delayed = buffer[index];
-                    buffer[index] = dry + delayed * feedback * (0.72f + tone * 0.22f);
+                    const float combColor = 0.91f + static_cast<float>(comb) * 0.025f;
+                    buffer[index] = std::tanh(
+                        tankInput + delayed * feedback * damping *
+                        combColor * ambientMotion);
                     wet += delayed * 0.25f;
                     reverbCombIndices[comb] = (index + 1) % buffer.size();
                 }
@@ -941,9 +984,27 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *,
                     const size_t index = reverbAllpassIndices[stage];
                     const float delayed = buffer[index];
                     const float input = wet;
-                    wet = delayed - input * 0.5f;
-                    buffer[index] = input + delayed * 0.5f;
+                    wet = delayed - input * allpassGain;
+                    buffer[index] = input + delayed * allpassGain;
                     reverbAllpassIndices[stage] = (index + 1) % buffer.size();
+                }
+
+                if (shimmerAmount > 0.0f && pitchBuffer.size() > 4) {
+                    pitchBuffer[pitchWriteIndex] = wet;
+                    const auto first = shimmerGrain(pitchPhase);
+                    const auto second = shimmerGrain(pitchPhase + 0.5f);
+                    const float weight = std::max(first[1] + second[1], 1e-4f);
+                    const float octave = (first[0] * first[1] +
+                        second[0] * second[1]) / weight;
+                    pitchToneState += 0.08f * (octave - pitchToneState);
+                    wet = wet * (1.0f - shimmerAmount * 0.32f) +
+                        pitchToneState * shimmerAmount;
+                    pitchWriteIndex = (pitchWriteIndex + 1) % pitchBuffer.size();
+                    pitchPhase += shimmerPhaseIncrement;
+                    pitchPhase -= std::floor(pitchPhase);
+                } else if (mode == 4) {
+                    pitchPhase += 0.07f / std::max(mSampleRate.load(), 1);
+                    if (pitchPhase >= 1.0f) pitchPhase -= 1.0f;
                 }
                 mMonoResult[i] = dry * (1.0f - mix) + wet * mix;
             }
