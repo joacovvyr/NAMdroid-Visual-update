@@ -6,6 +6,7 @@ import androidx.compose.ui.tooling.preview.Preview
 @Preview(name = "Phone landscape", widthDp = 780, heightDp = 360, showBackground = true)
 @Preview(name = "Compact landscape", widthDp = 640, heightDp = 320, showBackground = true)
 @Preview(name = "Tablet landscape", widthDp = 1024, heightDp = 600, showBackground = true)
+// Combined UI integration preview: Reverb, drag/delete and AMP-DROID.
 @Composable
 private fun StagePreview() {
     NamDroidTheme {
