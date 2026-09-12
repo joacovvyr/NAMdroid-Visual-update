@@ -843,6 +843,7 @@ private fun AmpFrontKnob(
         ) {
             Text(
                 "${"%.1f".format(value)} ${spec.unit}",
+                modifier = Modifier.offset(y = 5.dp),
                 color = Color(0xFF48E8EE),
                 fontSize = 7.sp,
                 maxLines = 1,
@@ -870,6 +871,7 @@ private fun AmpFrontKnob(
             Spacer(Modifier.height(2.dp))
             Text(
                 label,
+                modifier = Modifier.offset(y = (-5).dp),
                 color = Color.White,
                 fontSize = 7.sp,
                 fontWeight = FontWeight.Bold,
