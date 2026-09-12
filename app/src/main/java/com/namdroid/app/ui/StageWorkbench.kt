@@ -76,6 +76,29 @@ fun StageWorkbench(
     var confirmScene by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     val selected = blocks.firstOrNull { it.id == selectedId }
+
+    // Full-screen pedal editors are a separate navigation surface. They must
+    // never inherit the measurement constraints of the legacy split editor.
+    if (editing && selected?.type == BlockType.DELAY) {
+        BackHandler(foreground) { onCloseEditor() }
+        Box(Modifier.fillMaxSize().background(StageBlack).safeDrawingPadding()) {
+            DelayDroidEditor(
+                Modifier.fillMaxSize(),
+                selected,
+                onParameter,
+                { onToggleBlock(selected.id) },
+            )
+            IconButton(
+                onCloseEditor,
+                Modifier.align(Alignment.TopStart).zIndex(5f)
+                    .background(Color.Black.copy(alpha = .42f), CircleShape),
+            ) {
+                Icon(Icons.Default.ArrowBack, "Volver a la cadena", tint = Color.White)
+            }
+        }
+        return
+    }
+
     BackHandler(foreground && (editing || live)) { if (editing) onCloseEditor() else live = false }
     Column(Modifier.fillMaxSize().background(StageBlack).safeDrawingPadding()) {
         Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).background(StageSurface).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -381,23 +404,22 @@ fun StageWorkbench(
                 IconButton(delete) { Icon(Icons.Default.DeleteOutline, "Quitar efecto") }
             }
         }
-        if (block.type == BlockType.DELAY) {
-            DelayDroidEditor(Modifier.weight(1f).fillMaxWidth(), block, change, toggle)
-        } else {
-            Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Surface(
-                    modifier = Modifier.weight(.36f).fillMaxHeight(),
-                    color = StageSurface,
-                    shape = RoundedCornerShape(12.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, StageLine),
-                ) {
-                    GearFace(block, Modifier.fillMaxSize().padding(8.dp), large = true, change = change)
-                }
-                LazyVerticalGrid(columns = GridCells.Adaptive(170.dp), modifier = Modifier.weight(.64f).fillMaxHeight(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 8.dp)) {
-                    items(block.type.parameters, key = { it.key }) { spec -> StageParameter(block.id, spec, block.parameters[spec.key] ?: spec.default, block.type.color) { change(spec, it) } }
-                }
+        // Stable fallback: the full-screen Delay-Droid compositor remains
+        // isolated below, but is not entered until its device-only crash is
+        // reproduced with diagnostics. Delay keeps all DSP and parameters.
+        Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Surface(
+                modifier = Modifier.weight(.36f).fillMaxHeight(),
+                color = StageSurface,
+                shape = RoundedCornerShape(12.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, StageLine),
+            ) {
+                GearFace(block, Modifier.fillMaxSize().padding(8.dp), large = true, change = change)
             }
+            LazyVerticalGrid(columns = GridCells.Adaptive(170.dp), modifier = Modifier.weight(.64f).fillMaxHeight(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 8.dp)) {
+                items(block.type.parameters, key = { it.key }) { spec -> StageParameter(block.id, spec, block.parameters[spec.key] ?: spec.default, block.type.color) { change(spec, it) } }
             }
+        }
     }
 }
 
@@ -409,102 +431,210 @@ private fun DelayDroidEditor(
     toggle: () -> Unit,
 ) {
     var advanced by rememberSaveable(block.id) { mutableStateOf(false) }
+
     if (advanced) {
-        Column(modifier) {
-            TextButton({ advanced = false }, modifier = Modifier.align(Alignment.End)) { Text("VOLVER AL PEDAL") }
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(170.dp),
-                modifier = Modifier.fillMaxSize(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = PaddingValues(bottom = 8.dp),
-            ) {
-                items(block.type.parameters, key = { it.key }) { spec ->
-                    StageParameter(block.id, spec, block.parameters[spec.key] ?: spec.default, block.type.color) { change(spec, it) }
+        Box(modifier) {
+            Image(
+                painterResource(R.drawable.pedal_editor_background),
+                null,
+                Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
+            Column(Modifier.fillMaxSize().padding(14.dp)) {
+                DelayModeButton(
+                    "VOLVER AL PEDAL",
+                    { advanced = false },
+                    Modifier.align(Alignment.End),
+                )
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(170.dp),
+                    modifier = Modifier.fillMaxSize().padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(bottom = 8.dp),
+                ) {
+                    items(block.type.parameters, key = { it.key }) { spec ->
+                        StageParameter(
+                            block.id,
+                            spec,
+                            block.parameters[spec.key] ?: spec.default,
+                            block.type.color,
+                        ) { change(spec, it) }
+                    }
                 }
             }
         }
         return
     }
 
+    val specs = remember(block.type) { block.type.parameters.associateBy { it.key } }
+    val primaryKnobs = remember(specs) {
+        listOf(
+            "time" to "TIME",
+            "feedback" to "FEEDBACK",
+            "mix" to "MIX",
+            "cutoff" to "TONE",
+            "modulation" to "MOD",
+        ).mapNotNull { (key, label) -> specs[key]?.let { Triple(key, label, it) } }
+    }
+    val secondaryKnobs = remember(specs) {
+        listOf(
+            "character" to "CHARACTER",
+            "resonance" to "RESONANCE",
+            "level" to "LEVEL",
+        ).mapNotNull { (key, label) -> specs[key]?.let { Triple(key, label, it) } }
+    }
+    val layers = remember(specs) {
+        listOf("quarter" to "1/4", "sixteenth" to "1/16", "triplet" to "TRIPLET")
+            .mapNotNull { (key, label) -> specs[key]?.let { Triple(key, label, it) } }
+    }
     val pulse = rememberInfiniteTransition(label = "delay-led").animateFloat(
         initialValue = .38f,
         targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(540, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        animationSpec = infiniteRepeatable(
+            tween(540, easing = FastOutSlowInEasing),
+            RepeatMode.Reverse,
+        ),
         label = "delay-led-alpha",
     ).value
+    val switchDepth by animateFloatAsState(
+        if (block.enabled) 3f else 0f,
+        spring(stiffness = Spring.StiffnessMedium),
+        label = "switch-depth",
+    )
+
     Box(modifier, contentAlignment = Alignment.Center) {
-        BoxWithConstraints(Modifier.fillMaxWidth().aspectRatio(16f / 9f), contentAlignment = Alignment.Center) {
-            Image(painterResource(R.drawable.delay_droid_base), null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
-            Text("NAMdroid", Modifier.align(Alignment.TopStart).padding(start = maxWidth * .08f, top = maxHeight * .06f),
-                color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            TextButton({ advanced = true }, Modifier.align(Alignment.TopEnd).padding(end = maxWidth * .07f, top = maxHeight * .04f)) {
-                Text("CONTROLES", color = Color.White, fontSize = 10.sp)
-            }
-
-            Row(
-                Modifier.align(Alignment.TopCenter).padding(top = maxHeight * .12f).fillMaxWidth(.78f),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                listOf(
-                    "time" to "TIME",
-                    "feedback" to "FEEDBACK",
-                    "mix" to "MIX",
-                    "cutoff" to "TONE",
-                    "modulation" to "MOD",
-                ).forEach { (key, label) ->
-                    val spec = block.type.parameters.first { it.key == key }
-                    DelayFrontKnob(spec, label, block.parameters[key] ?: spec.default, change)
-                }
-            }
-
-            Row(
-                Modifier.align(Alignment.Center).offset(y = maxHeight * .09f).fillMaxWidth(.38f),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                listOf("quarter" to "1/4", "sixteenth" to "1/16", "triplet" to "TRIPLET").forEach { (key, label) ->
-                    val spec = block.type.parameters.first { it.key == key }
-                    val active = (block.parameters[key] ?: spec.default) >= 50f
-                    DelayLayerButton(label, active) { change(spec, if (active) 0f else 100f) }
-                }
-            }
-
-            Text(
-                "DELAY-DROID",
-                Modifier.align(Alignment.BottomCenter).padding(bottom = maxHeight * .09f),
-                color = Color.White,
-                fontSize = 25.sp,
-                fontWeight = FontWeight.Black,
-                letterSpacing = 1.5.sp,
-            )
-            Canvas(
-                Modifier.align(Alignment.CenterEnd).offset(x = -maxWidth * .10f, y = maxHeight * .13f).size(13.dp)
-            ) {
-                drawCircle(Color(0xFF27E9F2).copy(alpha = if (block.enabled) pulse else .16f))
-                if (block.enabled) drawCircle(Color.White.copy(alpha = .7f), radius = size.minDimension * .18f)
-            }
-            val switchDepth by animateFloatAsState(if (block.enabled) 3f else 0f, spring(stiffness = Spring.StiffnessMedium), label = "switch-depth")
+        Image(
+            painterResource(R.drawable.pedal_editor_background),
+            null,
+            Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop,
+        )
+        BoxWithConstraints(
+            Modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 12.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            val pedalWidth = minOf(maxWidth, maxHeight * (16f / 9f))
+            val pedalHeight = pedalWidth * (9f / 16f)
             Box(
-                Modifier.align(Alignment.CenterEnd).offset(x = -maxWidth * .06f, y = maxHeight * .26f)
-                    .size(72.dp).clickable(onClick = toggle),
+                Modifier.size(pedalWidth, pedalHeight),
                 contentAlignment = Alignment.Center,
             ) {
                 Image(
-                    painterResource(R.drawable.delay_footswitch_base),
+                    painterResource(R.drawable.delay_droid_base),
                     null,
                     Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Fit,
+                    contentScale = ContentScale.FillBounds,
                 )
+                DelayModeButton(
+                    "CONTROLES",
+                    { advanced = true },
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(
+                            end = pedalWidth * .022f,
+                            top = pedalHeight * .022f,
+                        )
+                        .zIndex(3f),
+                )
+                Column(
+                    Modifier.fillMaxSize().padding(
+                        start = pedalWidth * .065f,
+                        end = pedalWidth * .065f,
+                        top = pedalHeight * .055f,
+                        bottom = pedalHeight * .055f,
+                    ),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Spacer(Modifier.height(30.dp))
+                    Row(
+                        Modifier.weight(.38f).fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        primaryKnobs.forEach { (key, label, spec) ->
+                            DelayFrontKnob(
+                                spec,
+                                label,
+                                block.parameters[key] ?: spec.default,
+                                change,
+                                Modifier.weight(1f),
+                            )
+                        }
+                    }
+                    Row(
+                        Modifier.weight(.38f).fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        secondaryKnobs.forEach { (key, label, spec) ->
+                            DelayFrontKnob(
+                                spec,
+                                label,
+                                block.parameters[key] ?: spec.default,
+                                change,
+                                Modifier.weight(1f),
+                            )
+                        }
+                        layers.forEach { (key, label, spec) ->
+                            val active = (block.parameters[key] ?: spec.default) >= 50f
+                            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                DelayLayerButton(label, active) {
+                                    change(spec, if (active) 0f else 100f)
+                                }
+                            }
+                        }
+                        Column(
+                            Modifier.weight(1f),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(3.dp),
+                        ) {
+                            Canvas(Modifier.size(12.dp)) {
+                                drawCircle(
+                                    Color(0xFF27E9F2).copy(
+                                        alpha = if (block.enabled) pulse else .16f,
+                                    ),
+                                )
+                                if (block.enabled) {
+                                    drawCircle(
+                                        Color.White.copy(alpha = .7f),
+                                        radius = size.minDimension * .18f,
+                                    )
+                                }
+                            }
+                            Box(
+                                Modifier.size(54.dp).clickable(onClick = toggle),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Image(
+                                    painterResource(R.drawable.delay_footswitch_base),
+                                    null,
+                                    Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Fit,
+                                )
+                                Image(
+                                    painterResource(R.drawable.delay_footswitch_cap),
+                                    "Activar o desactivar Delay",
+                                    Modifier.fillMaxSize().graphicsLayer {
+                                        translationY = switchDepth
+                                        scaleX = if (block.enabled) .97f else 1f
+                                        scaleY = if (block.enabled) .97f else 1f
+                                    },
+                                    contentScale = ContentScale.Fit,
+                                )
+                            }
+                        }
+                    }
+                    Spacer(Modifier.weight(.18f))
+                }
                 Image(
-                    painterResource(R.drawable.delay_footswitch_cap),
-                    "Activar o desactivar Delay",
-                    Modifier.fillMaxSize().graphicsLayer {
-                        // Sólo el actuador central se hunde; la tuerca y el
-                        // reborde permanecen fijos como en el hardware real.
-                        translationY = switchDepth
-                        scaleX = if (block.enabled) .97f else 1f
-                        scaleY = if (block.enabled) .97f else 1f
-                    },
+                    painterResource(R.drawable.delay_droid_wordmark),
+                    "DELAY-DROID",
+                    Modifier
+                        .align(Alignment.Center)
+                        .offset(y = pedalHeight * .335f)
+                        .width(pedalWidth * .36f)
+                        .height(pedalHeight * .105f),
                     contentScale = ContentScale.Fit,
                 )
             }
@@ -513,42 +643,117 @@ private fun DelayDroidEditor(
 }
 
 @Composable
-private fun DelayFrontKnob(spec: ParameterSpec, label: String, value: Float, change: (ParameterSpec, Float) -> Unit) {
+private fun DelayModeButton(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier
+            .clip(RoundedCornerShape(7.dp))
+            .background(Color(0xCC10181A))
+            .border(1.dp, Color(0xFF27E9F2), RoundedCornerShape(7.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            color = Color(0xFF42F5C5),
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = .5.sp,
+        )
+    }
+}
+
+@Composable
+private fun DelayFrontKnob(
+    spec: ParameterSpec,
+    label: String,
+    value: Float,
+    change: (ParameterSpec, Float) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val currentValue by rememberUpdatedState(value)
-    val fraction = ((value - spec.range.start) / (spec.range.endInclusive - spec.range.start)).coerceIn(0f, 1f)
-    Column(Modifier.width(72.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+    val fraction = ((value - spec.range.start) /
+        (spec.range.endInclusive - spec.range.start)).coerceIn(0f, 1f)
+    Column(
+        modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
         MasterKnob(
             fraction,
             Color(0xFF27E9F2),
-            Modifier.size(48.dp).pointerInput(spec.key) {
+            Modifier.size(44.dp).pointerInput(spec.key) {
                 detectVerticalDragGestures { event, amount ->
                     event.consume()
-                    change(spec, (currentValue - amount / 210.dp.toPx() * (spec.range.endInclusive - spec.range.start)).coerceIn(spec.range))
+                    change(
+                        spec,
+                        (currentValue - amount / 210.dp.toPx() *
+                            (spec.range.endInclusive - spec.range.start))
+                            .coerceIn(spec.range),
+                    )
                 }
             },
             3f,
         )
-        Text(label, color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-        Text("%.1f".format(value), color = Color(0xFF27E9F2), fontSize = 8.sp)
+        Text(
+            label,
+            color = Color.White,
+            fontSize = 8.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+        )
+        Text(
+            "%.1f".format(value),
+            color = Color(0xFF27E9F2),
+            fontSize = 7.sp,
+            maxLines = 1,
+        )
     }
 }
 
 @Composable
 private fun DelayLayerButton(label: String, active: Boolean, onClick: () -> Unit) {
-    val scale by animateFloatAsState(if (active) .94f else 1f, spring(stiffness = Spring.StiffnessHigh), label = "layer-button")
-    Box(
-        Modifier.size(74.dp, 48.dp).graphicsLayer {
-            scaleX = scale
-            scaleY = scale
-            alpha = if (active) 1f else .78f
-        }.clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
+    val scale by animateFloatAsState(
+        if (active) .94f else 1f,
+        spring(stiffness = Spring.StiffnessHigh),
+        label = "layer-button",
+    )
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        Image(painterResource(R.drawable.delay_layer_button), null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
-        Text(label, color = if (active) Color(0xFF27E9F2) else Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        Box(
+            Modifier
+                .size(82.dp, 50.dp)
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                    alpha = if (active) 1f else .78f
+                }
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) {
+            Image(
+                painterResource(R.drawable.delay_layer_button),
+                null,
+                Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
+        }
+        Text(
+            label,
+            color = if (active) Color(0xFF27E9F2) else Color.White,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+        )
     }
 }
-
 
 @Composable private fun StageParameter(blockId: String, spec: ParameterSpec, value: Float, tint: Color, change: (Float) -> Unit) {
     var exact by remember(blockId, spec.key) { mutableStateOf(false) }
