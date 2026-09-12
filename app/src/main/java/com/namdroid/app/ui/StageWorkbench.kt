@@ -37,6 +37,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.ContentScale
@@ -50,6 +52,8 @@ import androidx.compose.ui.zIndex
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import com.namdroid.app.R
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 private val StageBlack = Color(0xFF090C10)
@@ -65,6 +69,7 @@ fun StageWorkbench(
     onSelect: (String) -> Unit, onCloseEditor: () -> Unit,
     onMove: (Int, Int) -> Unit, onToggleBlock: (String) -> Unit,
     onParameter: (ParameterSpec, Float) -> Unit, onDelete: () -> Unit,
+    onDropDelete: (String) -> Unit, onUndoDelete: () -> Unit,
     onScene: (Int) -> Unit, onSaveScene: () -> Unit, onTap: () -> Unit,
     onRigs: () -> Unit, onTone: () -> Unit, onAudio: () -> Unit, onSettings: () -> Unit,
     onAdd: () -> Unit, onTuner: () -> Unit, onLooper: () -> Unit,
@@ -75,7 +80,21 @@ fun StageWorkbench(
     var overflow by remember { mutableStateOf(false) }
     var confirmScene by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    val snackbarHost = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
     val selected = blocks.firstOrNull { it.id == selectedId }
+    val deleteWithUndo: (String) -> Unit = { id ->
+        onDropDelete(id)
+        snackbarHost.currentSnackbarData?.dismiss()
+        scope.launch {
+            val result = snackbarHost.showSnackbar(
+                message = "Efecto eliminado del rig",
+                actionLabel = "DESHACER",
+                duration = SnackbarDuration.Long,
+            )
+            if (result == SnackbarResult.ActionPerformed) onUndoDelete()
+        }
+    }
 
     // Full-screen pedal editors are a separate navigation surface. They must
     // never inherit the measurement constraints of the legacy split editor.
@@ -100,7 +119,8 @@ fun StageWorkbench(
     }
 
     BackHandler(foreground && (editing || live)) { if (editing) onCloseEditor() else live = false }
-    Column(Modifier.fillMaxSize().background(StageBlack).safeDrawingPadding()) {
+    Box(Modifier.fillMaxSize().background(StageBlack).safeDrawingPadding()) {
+        Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).background(StageSurface).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             if (editing) IconButton(onCloseEditor) { Icon(Icons.Default.ArrowBack, "Volver a la cadena") }
             TextButton(onRigs, Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 8.dp)) {
@@ -129,7 +149,16 @@ fun StageWorkbench(
             StageEditor(Modifier.weight(1f), selected, onParameter, { onToggleBlock(selected.id) }, { confirmDelete = true }, onTone, onPickNam, onPickIr,
                 { delta -> val index = blocks.indexOfFirst { it.id == selected.id }; onMove(index, index + delta) })
         } else {
-            StageChain(Modifier.weight(1f), blocks, selectedId, live, onSelect, onToggleBlock, onMove)
+            StageChain(
+                Modifier.weight(1f),
+                blocks,
+                selectedId,
+                live,
+                onSelect,
+                onToggleBlock,
+                onMove,
+                deleteWithUndo,
+            )
         }
         Row(Modifier.fillMaxWidth().background(StageSurface).padding(horizontal = 8.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
             repeat(4) { index ->
@@ -148,6 +177,11 @@ fun StageWorkbench(
             StageMeter("IN", inputDb); StageMeter("OUT", outputDb)
             Text(status, Modifier.weight(1f), color = Color(0xFFADB8C4), fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
+        }
+        SnackbarHost(
+            hostState = snackbarHost,
+            modifier = Modifier.align(Alignment.BottomCenter).padding(12.dp),
+        )
     }
     if (tools) AlertDialog(onDismissRequest = { tools = false }, title = { Text("Herramientas del rig") }, text = {
         Column(Modifier.verticalScroll(rememberScrollState())) {
@@ -174,39 +208,200 @@ fun StageWorkbench(
     }
 }
 
-@Composable private fun StageChain(modifier: Modifier, blocks: List<PedalBlock>, selectedId: String, live: Boolean, select: (String) -> Unit, toggle: (String) -> Unit, move: (Int, Int) -> Unit) {
+@Composable
+private fun StageChain(
+    modifier: Modifier,
+    blocks: List<PedalBlock>,
+    selectedId: String,
+    live: Boolean,
+    select: (String) -> Unit,
+    toggle: (String) -> Unit,
+    move: (Int, Int) -> Unit,
+    delete: (String) -> Unit,
+) {
     val bounds = remember { mutableMapOf<String, Rect>() }
+    var chainBounds by remember { mutableStateOf(Rect.Zero) }
     var dragged by remember { mutableStateOf<String?>(null) }
     var delta by remember { mutableStateOf(Offset.Zero) }
     var finger by remember { mutableStateOf(Offset.Zero) }
+    var dragStartFinger by remember { mutableStateOf(Offset.Zero) }
+    var deleteHover by remember { mutableStateOf(false) }
+    var deleteArmed by remember { mutableStateOf(false) }
+    val haptics = LocalHapticFeedback.current
     val latestBlocks by rememberUpdatedState(blocks.toList())
     val latestMove by rememberUpdatedState(move)
-    BoxWithConstraints(modifier.fillMaxWidth()) {
+    val latestDelete by rememberUpdatedState(delete)
+    val latestDeleteArmed by rememberUpdatedState(deleteArmed)
+
+    LaunchedEffect(deleteHover, dragged) {
+        deleteArmed = false
+        if (deleteHover && dragged != null) {
+            delay(450)
+            if (deleteHover && dragged != null) {
+                deleteArmed = true
+                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+            }
+        }
+    }
+
+    val zoneStrength by animateFloatAsState(
+        targetValue = when {
+            deleteArmed -> 1f
+            deleteHover -> .72f
+            dragged != null -> .34f
+            else -> 0f
+        },
+        animationSpec = tween(160),
+        label = "delete-zone-strength",
+    )
+
+    BoxWithConstraints(
+        modifier
+            .fillMaxWidth()
+            .onGloballyPositioned { chainBounds = it.boundsInRoot() },
+    ) {
         val columns = (maxWidth.value / if (live) 150f else 114f).toInt().coerceIn(2, 6)
         val rows = (blocks.size + columns - 1) / columns
-        val cellHeight = ((maxHeight - 26.dp) / rows.coerceAtLeast(1) - 8.dp).coerceIn(86.dp, if (live) 150.dp else 132.dp)
+        val cellHeight = ((maxHeight - 26.dp) / rows.coerceAtLeast(1) - 8.dp)
+            .coerceIn(86.dp, if (live) 150.dp else 132.dp)
         Column(Modifier.fillMaxSize().padding(horizontal = 10.dp)) {
-            Text(if (live) "LIVE  /  Tocá para activar · Mantené para editar" else "SIGNAL PATH  /  Tocá para editar · Arrastrá para reordenar", color = Color(0xFFADB8C4), fontSize = 10.sp, modifier = Modifier.padding(vertical = 5.dp))
-            LazyVerticalGrid(columns = GridCells.Fixed(columns), modifier = Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 4.dp)) {
+            Text(
+                if (live) "LIVE  /  Tocá para activar · Mantené para editar"
+                else "SIGNAL PATH  /  Tocá para editar · Arrastrá para reordenar",
+                color = Color(0xFFADB8C4),
+                fontSize = 10.sp,
+                modifier = Modifier.padding(vertical = 5.dp),
+            )
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(columns),
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(bottom = 4.dp),
+            ) {
                 items(blocks, key = { it.id }) { block ->
                     val position = blocks.indexOfFirst { it.id == block.id }
-                    val dragModifier = Modifier.onGloballyPositioned { bounds[block.id] = it.boundsInRoot() }
-                        .zIndex(if (dragged == block.id) 2f else 0f)
-                        .graphicsLayer { if (dragged == block.id) { translationX = delta.x; translationY = delta.y; scaleX = 1.05f; scaleY = 1.05f; alpha = .88f } }
-                        .pointerInput(block.id, live) {
-                            detectDragGesturesAfterLongPress(onDragStart = { local ->
-                                if (live) select(block.id)
-                                else if (block.type.engineId != null) { dragged = block.id; delta = Offset.Zero; finger = (bounds[block.id]?.topLeft ?: Offset.Zero) + local }
-                            }, onDragCancel = { dragged = null; delta = Offset.Zero }, onDragEnd = {
-                                val id = dragged
-                                if (id != null) {
-                                    val target = latestBlocks.firstOrNull { it.id != id && bounds[it.id]?.contains(finger) == true }
-                                    if (target != null) latestMove(latestBlocks.indexOfFirst { it.id == id }, latestBlocks.indexOfFirst { it.id == target.id })
-                                }
-                                dragged = null; delta = Offset.Zero
-                            }) { change, amount -> if (dragged == block.id) { change.consume(); delta += amount; finger += amount } }
+                    val dragModifier = Modifier
+                        .onGloballyPositioned { bounds[block.id] = it.boundsInRoot() }
+                        .zIndex(if (dragged == block.id) 6f else 0f)
+                        .graphicsLayer {
+                            if (dragged == block.id) {
+                                translationX = delta.x
+                                translationY = delta.y
+                                scaleX = if (deleteArmed) .92f else 1.05f
+                                scaleY = if (deleteArmed) .92f else 1.05f
+                                alpha = if (deleteArmed) .70f else .88f
+                            }
                         }
-                    StageTile(block, position, block.id == selectedId, live, dragModifier.height(cellHeight)) { if (live && block.type.engineId != null) toggle(block.id) else select(block.id) }
+                        .then(
+                            if (dragged == block.id && deleteArmed) {
+                                Modifier.border(2.dp, Color(0xFFFF3B30), RoundedCornerShape(9.dp))
+                            } else Modifier
+                        )
+                        .pointerInput(block.id, live) {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = { local ->
+                                    if (live) {
+                                        select(block.id)
+                                    } else if (block.type.engineId != null) {
+                                        dragged = block.id
+                                        delta = Offset.Zero
+                                        finger = (bounds[block.id]?.topLeft ?: Offset.Zero) + local
+                                        dragStartFinger = finger
+                                        deleteHover = false
+                                        deleteArmed = false
+                                    }
+                                },
+                                onDragCancel = {
+                                    dragged = null
+                                    delta = Offset.Zero
+                                    deleteHover = false
+                                    deleteArmed = false
+                                },
+                                onDragEnd = {
+                                    val id = dragged
+                                    if (id != null && latestDeleteArmed) {
+                                        latestDelete(id)
+                                    } else if (id != null) {
+                                        val target = latestBlocks.firstOrNull {
+                                            it.id != id && bounds[it.id]?.contains(finger) == true
+                                        }
+                                        if (target != null) {
+                                            latestMove(
+                                                latestBlocks.indexOfFirst { it.id == id },
+                                                latestBlocks.indexOfFirst { it.id == target.id },
+                                            )
+                                        }
+                                    }
+                                    dragged = null
+                                    delta = Offset.Zero
+                                    deleteHover = false
+                                    deleteArmed = false
+                                },
+                            ) { change, amount ->
+                                if (dragged == block.id) {
+                                    change.consume()
+                                    delta += amount
+                                    finger += amount
+                                    val intentionalTravel =
+                                        finger.x - dragStartFinger.x >= 44.dp.toPx()
+                                    val deepEdge =
+                                        finger.x >= chainBounds.right - chainBounds.width * .09f
+                                    deleteHover = intentionalTravel && deepEdge
+                                }
+                            }
+                        }
+                    StageTile(
+                        block,
+                        position,
+                        block.id == selectedId,
+                        live,
+                        dragModifier.height(cellHeight),
+                    ) {
+                        if (live && block.type.engineId != null) toggle(block.id)
+                        else select(block.id)
+                    }
+                }
+            }
+        }
+
+        if (dragged != null) {
+            Box(
+                Modifier
+                    .align(Alignment.CenterEnd)
+                    .fillMaxHeight()
+                    .width(maxWidth * .16f)
+                    .zIndex(5f)
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(
+                                Color.Transparent,
+                                Color(0xFFFF2418).copy(alpha = zoneStrength * .82f),
+                            ),
+                        ),
+                    ),
+                contentAlignment = Alignment.CenterEnd,
+            ) {
+                Column(
+                    Modifier.padding(end = 18.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(7.dp),
+                ) {
+                    Icon(
+                        Icons.Default.DeleteOutline,
+                        contentDescription = "Arrastrar hasta aquí para eliminar",
+                        tint = Color.White,
+                        modifier = Modifier.size(if (deleteArmed) 52.dp else 38.dp),
+                    )
+                    Text(
+                        if (deleteArmed) "SOLTÁ PARA BORRAR"
+                        else if (deleteHover) "MANTENÉ"
+                        else "ELIMINAR",
+                        color = Color.White,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Black,
+                        maxLines = 1,
+                    )
                 }
             }
         }

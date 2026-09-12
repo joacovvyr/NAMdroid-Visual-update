@@ -72,6 +72,7 @@ fun PedalboardScreen(
     var showLooper by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     var showBlockEditor by remember { mutableStateOf(false) }
+    var lastDeletedBlock by remember { mutableStateOf<Pair<Int, PedalBlock>?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(notice) { if (notice != null) { delay(6000); notice = null } }
     var lastTap by remember { mutableLongStateOf(0L) }
@@ -195,15 +196,30 @@ fun PedalboardScreen(
             else -> syncEngine()
         }
     }
-    fun deleteSelected() {
-        val block = selected ?: return
+    fun deleteBlock(id: String) {
+        val index = blocks.indexOfFirst { it.id == id }
+        if (index < 0) return
+        val block = blocks[index]
         if (block.type.engineId == null) return
-        val index = blocks.indexOf(block)
-        blocks.remove(block)
-        selectedId = blocks.getOrNull(index.coerceAtMost(blocks.lastIndex))?.id ?: blocks.first().id
+        lastDeletedBlock = index to block
+        blocks.removeAt(index)
+        selectedId = blocks
+            .getOrNull(index.coerceAtMost(blocks.lastIndex))
+            ?.id ?: blocks.first().id
         showBlockEditor = false
         syncEngine()
         persist()
+    }
+    fun undoDelete() {
+        val deleted = lastDeletedBlock ?: return
+        blocks.add(deleted.first.coerceIn(0, blocks.size), deleted.second)
+        selectedId = deleted.second.id
+        lastDeletedBlock = null
+        syncEngine()
+        persist()
+    }
+    fun deleteSelected() {
+        selected?.let { deleteBlock(it.id) }
     }
 
     fun tapTempo() {
@@ -238,7 +254,10 @@ fun PedalboardScreen(
                 syncEngine()
             }
         },
-        onParameter = ::setSelectedParameter, onDelete = ::deleteSelected,
+        onParameter = ::setSelectedParameter,
+        onDelete = ::deleteSelected,
+        onDropDelete = ::deleteBlock,
+        onUndoDelete = ::undoDelete,
         onScene = ::applyScene, onSaveScene = {
             val scenes = rigs[activeRigIndex].scenes.toMutableList()
             scenes[activeScene] = RigScene(('A'.code + activeScene).toChar().toString(), blocks.associate { it.id to it.enabled }, blocks.associate { it.id to it.parameters })
