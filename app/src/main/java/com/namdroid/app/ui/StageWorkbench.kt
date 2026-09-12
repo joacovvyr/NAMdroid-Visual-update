@@ -427,86 +427,97 @@ private fun DelayDroidEditor(
         return
     }
 
+    val specs = remember(block.type) { block.type.parameters.associateBy { it.key } }
+    val frontKnobs = remember(specs) {
+        listOf(
+            "time" to "TIME",
+            "feedback" to "FEEDBACK",
+            "mix" to "MIX",
+            "cutoff" to "TONE",
+            "modulation" to "MOD",
+        ).mapNotNull { (key, label) -> specs[key]?.let { Triple(key, label, it) } }
+    }
+    val layers = remember(specs) {
+        listOf("quarter" to "1/4", "sixteenth" to "1/16", "triplet" to "TRIPLET")
+            .mapNotNull { (key, label) -> specs[key]?.let { Triple(key, label, it) } }
+    }
     val pulse = rememberInfiniteTransition(label = "delay-led").animateFloat(
         initialValue = .38f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(tween(540, easing = FastOutSlowInEasing), RepeatMode.Reverse),
         label = "delay-led-alpha",
     ).value
-    Box(modifier, contentAlignment = Alignment.Center) {
-        BoxWithConstraints(Modifier.fillMaxWidth().aspectRatio(16f / 9f), contentAlignment = Alignment.Center) {
-            Image(painterResource(R.drawable.delay_droid_base), null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
-            Text("NAMdroid", Modifier.align(Alignment.TopStart).padding(start = maxWidth * .08f, top = maxHeight * .06f),
-                color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            TextButton({ advanced = true }, Modifier.align(Alignment.TopEnd).padding(end = maxWidth * .07f, top = maxHeight * .04f)) {
-                Text("CONTROLES", color = Color.White, fontSize = 10.sp)
-            }
+    val switchDepth by animateFloatAsState(
+        if (block.enabled) 3f else 0f,
+        spring(stiffness = Spring.StiffnessMedium),
+        label = "switch-depth",
+    )
 
+    Box(modifier.padding(4.dp), contentAlignment = Alignment.Center) {
+        Image(painterResource(R.drawable.delay_droid_base), null, Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds)
+        Column(
+            Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 14.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("NAMdroid", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.weight(1f))
+                TextButton({ advanced = true }) { Text("CONTROLES", color = Color.White, fontSize = 10.sp) }
+            }
             Row(
-                Modifier.align(Alignment.TopCenter).padding(top = maxHeight * .12f).fillMaxWidth(.78f),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                Modifier.weight(.48f).fillMaxWidth(.82f),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                listOf(
-                    "time" to "TIME",
-                    "feedback" to "FEEDBACK",
-                    "mix" to "MIX",
-                    "cutoff" to "TONE",
-                    "modulation" to "MOD",
-                ).forEach { (key, label) ->
-                    val spec = block.type.parameters.first { it.key == key }
+                frontKnobs.forEach { (key, label, spec) ->
                     DelayFrontKnob(spec, label, block.parameters[key] ?: spec.default, change)
                 }
             }
-
             Row(
-                Modifier.align(Alignment.Center).offset(y = maxHeight * .09f).fillMaxWidth(.38f),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                Modifier.weight(.23f).fillMaxWidth(.42f),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                listOf("quarter" to "1/4", "sixteenth" to "1/16", "triplet" to "TRIPLET").forEach { (key, label) ->
-                    val spec = block.type.parameters.first { it.key == key }
+                layers.forEach { (key, label, spec) ->
                     val active = (block.parameters[key] ?: spec.default) >= 50f
                     DelayLayerButton(label, active) { change(spec, if (active) 0f else 100f) }
                 }
             }
-
-            Text(
-                "DELAY-DROID",
-                Modifier.align(Alignment.BottomCenter).padding(bottom = maxHeight * .09f),
-                color = Color.White,
-                fontSize = 25.sp,
-                fontWeight = FontWeight.Black,
-                letterSpacing = 1.5.sp,
-            )
-            Canvas(
-                Modifier.align(Alignment.CenterEnd).offset(x = -maxWidth * .10f, y = maxHeight * .13f).size(13.dp)
+            Row(
+                Modifier.weight(.29f).fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                drawCircle(Color(0xFF27E9F2).copy(alpha = if (block.enabled) pulse else .16f))
-                if (block.enabled) drawCircle(Color.White.copy(alpha = .7f), radius = size.minDimension * .18f)
-            }
-            val switchDepth by animateFloatAsState(if (block.enabled) 3f else 0f, spring(stiffness = Spring.StiffnessMedium), label = "switch-depth")
-            Box(
-                Modifier.align(Alignment.CenterEnd).offset(x = -maxWidth * .06f, y = maxHeight * .26f)
-                    .size(72.dp).clickable(onClick = toggle),
-                contentAlignment = Alignment.Center,
-            ) {
-                Image(
-                    painterResource(R.drawable.delay_footswitch_base),
-                    null,
-                    Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Fit,
+                Spacer(Modifier.weight(1f))
+                Text(
+                    "DELAY-DROID",
+                    color = Color.White,
+                    fontSize = 25.sp,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 1.5.sp,
                 )
-                Image(
-                    painterResource(R.drawable.delay_footswitch_cap),
-                    "Activar o desactivar Delay",
-                    Modifier.fillMaxSize().graphicsLayer {
-                        // Sólo el actuador central se hunde; la tuerca y el
-                        // reborde permanecen fijos como en el hardware real.
-                        translationY = switchDepth
-                        scaleX = if (block.enabled) .97f else 1f
-                        scaleY = if (block.enabled) .97f else 1f
-                    },
-                    contentScale = ContentScale.Fit,
-                )
+                Spacer(Modifier.weight(.55f))
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Canvas(Modifier.size(13.dp)) {
+                        drawCircle(Color(0xFF27E9F2).copy(alpha = if (block.enabled) pulse else .16f))
+                        if (block.enabled) drawCircle(Color.White.copy(alpha = .7f), radius = size.minDimension * .18f)
+                    }
+                    Box(
+                        Modifier.size(66.dp).clickable(onClick = toggle),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Image(painterResource(R.drawable.delay_footswitch_base), null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                        Image(
+                            painterResource(R.drawable.delay_footswitch_cap),
+                            "Activar o desactivar Delay",
+                            Modifier.fillMaxSize().graphicsLayer {
+                                translationY = switchDepth
+                                scaleX = if (block.enabled) .97f else 1f
+                                scaleY = if (block.enabled) .97f else 1f
+                            },
+                            contentScale = ContentScale.Fit,
+                        )
+                    }
+                }
             }
         }
     }
