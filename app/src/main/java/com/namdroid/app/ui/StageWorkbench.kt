@@ -116,6 +116,56 @@ fun StageWorkbench(
         return
     }
 
+    val standardDroidTypes = setOf(
+        BlockType.COMPRESSOR,
+        BlockType.DRIVE,
+        BlockType.EQ,
+        BlockType.CHORUS,
+        BlockType.AUTO_WAH,
+        BlockType.TREMOLO,
+        BlockType.DETUNE,
+    )
+    if (editing && selected != null && selected.type in standardDroidTypes) {
+        BackHandler(foreground) { onCloseEditor() }
+        Box(Modifier.fillMaxSize().background(StageBlack).safeDrawingPadding()) {
+            StandardDroidEditor(
+                modifier = Modifier.fillMaxSize(),
+                block = selected,
+                change = onParameter,
+                toggle = { onToggleBlock(selected.id) },
+            )
+            IconButton(
+                onCloseEditor,
+                Modifier.align(Alignment.TopStart).zIndex(5f)
+                    .background(Color.Black.copy(alpha = .42f), CircleShape),
+            ) {
+                Icon(Icons.Default.ArrowBack, "Volver a la cadena", tint = Color.White)
+            }
+        }
+        return
+    }
+
+    if (editing && selected?.type == BlockType.IR) {
+        BackHandler(foreground) { onCloseEditor() }
+        Box(Modifier.fillMaxSize().background(StageBlack).safeDrawingPadding()) {
+            CabDroidEditor(
+                modifier = Modifier.fillMaxSize(),
+                block = selected,
+                change = onParameter,
+                toggle = { onToggleBlock(selected.id) },
+                pickIr = onPickIr,
+            )
+            IconButton(
+                onCloseEditor,
+                Modifier.align(Alignment.TopStart).zIndex(5f)
+                    .background(Color.Black.copy(alpha = .42f), CircleShape),
+            ) {
+                Icon(Icons.Default.ArrowBack, "Volver a la cadena", tint = Color.White)
+            }
+        }
+        return
+    }
+
     // AMP-DROID uses a fixed-ratio compositor so every interactive layer
     // stays registered to the approved amplifier artwork on every screen.
     if (editing && selected?.type == BlockType.AMP) {
