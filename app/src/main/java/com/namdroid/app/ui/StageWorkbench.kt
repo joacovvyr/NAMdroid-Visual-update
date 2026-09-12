@@ -79,15 +79,26 @@ fun StageWorkbench(
 
     // Full-screen pedal editors are a separate navigation surface. They must
     // never inherit the measurement constraints of the legacy split editor.
-    if (editing && selected?.type == BlockType.DELAY) {
+    if (editing && selected != null &&
+        (selected.type == BlockType.DELAY || selected.type == BlockType.REVERB)
+    ) {
         BackHandler(foreground) { onCloseEditor() }
         Box(Modifier.fillMaxSize().background(StageBlack).safeDrawingPadding()) {
-            DelayDroidEditor(
-                Modifier.fillMaxSize(),
-                selected,
-                onParameter,
-                { onToggleBlock(selected.id) },
-            )
+            when (selected.type) {
+                BlockType.DELAY -> DelayDroidEditor(
+                    Modifier.fillMaxSize(),
+                    selected,
+                    onParameter,
+                    { onToggleBlock(selected.id) },
+                )
+                BlockType.REVERB -> ReverbDroidEditor(
+                    Modifier.fillMaxSize(),
+                    selected,
+                    onParameter,
+                    { onToggleBlock(selected.id) },
+                )
+                else -> Unit
+            }
             IconButton(
                 onCloseEditor,
                 Modifier.align(Alignment.TopStart).zIndex(5f)
@@ -754,6 +765,233 @@ private fun DelayLayerButton(label: String, active: Boolean, onClick: () -> Unit
         )
     }
 }
+
+@Composable
+private fun ReverbDroidEditor(
+    modifier: Modifier,
+    block: PedalBlock,
+    change: (ParameterSpec, Float) -> Unit,
+    toggle: () -> Unit,
+) {
+    var advanced by rememberSaveable(block.id) { mutableStateOf(false) }
+    val reverbTint = Color(0xFFFF64C8)
+
+    if (advanced) {
+        Box(modifier) {
+            Image(
+                painterResource(R.drawable.pedal_editor_background),
+                null,
+                Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
+            Column(Modifier.fillMaxSize().padding(14.dp)) {
+                DelayModeButton(
+                    "VOLVER AL PEDAL",
+                    { advanced = false },
+                    Modifier.align(Alignment.End),
+                )
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(170.dp),
+                    modifier = Modifier.fillMaxSize().padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(bottom = 8.dp),
+                ) {
+                    items(block.type.parameters, key = { it.key }) { spec ->
+                        StageParameter(
+                            block.id,
+                            spec,
+                            block.parameters[spec.key] ?: spec.default,
+                            reverbTint,
+                        ) { change(spec, it) }
+                    }
+                }
+            }
+        }
+        return
+    }
+
+    val specs = remember(block.type) { block.type.parameters.associateBy { it.key } }
+    val knobs = remember(specs) {
+        listOf(
+            "decay" to "DECAY",
+            "tone" to "TONE",
+            "mix" to "MIX",
+        ).mapNotNull { (key, label) -> specs[key]?.let { Triple(key, label, it) } }
+    }
+    val pulse = rememberInfiniteTransition(label = "reverb-led").animateFloat(
+        initialValue = .38f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            tween(680, easing = FastOutSlowInEasing),
+            RepeatMode.Reverse,
+        ),
+        label = "reverb-led-alpha",
+    ).value
+    val switchDepth by animateFloatAsState(
+        if (block.enabled) 3f else 0f,
+        spring(stiffness = Spring.StiffnessMedium),
+        label = "reverb-switch-depth",
+    )
+
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Image(
+            painterResource(R.drawable.pedal_editor_background),
+            null,
+            Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop,
+        )
+        BoxWithConstraints(
+            Modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 12.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            val pedalWidth = minOf(maxWidth, maxHeight * (16f / 9f))
+            val pedalHeight = pedalWidth * (9f / 16f)
+            Box(
+                Modifier.size(pedalWidth, pedalHeight),
+                contentAlignment = Alignment.Center,
+            ) {
+                Image(
+                    painterResource(R.drawable.reverb_droid_base),
+                    null,
+                    Modifier.fillMaxSize(),
+                    contentScale = ContentScale.FillBounds,
+                )
+                DelayModeButton(
+                    "CONTROLES",
+                    { advanced = true },
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(
+                            end = pedalWidth * .022f,
+                            top = pedalHeight * .022f,
+                        )
+                        .zIndex(3f),
+                )
+                Row(
+                    Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = pedalHeight * .14f)
+                        .fillMaxWidth(.62f),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    knobs.forEach { (key, label, spec) ->
+                        ReverbFrontKnob(
+                            spec,
+                            label,
+                            block.parameters[key] ?: spec.default,
+                            change,
+                            reverbTint,
+                        )
+                    }
+                }
+                Image(
+                    painterResource(R.drawable.reverb_droid_wordmark),
+                    "REVERB-DROID",
+                    Modifier
+                        .align(Alignment.Center)
+                        .offset(y = pedalHeight * .335f)
+                        .width(pedalWidth * .39f)
+                        .height(pedalHeight * .105f),
+                    contentScale = ContentScale.Fit,
+                )
+                Column(
+                    Modifier
+                        .align(Alignment.CenterEnd)
+                        .padding(end = pedalWidth * .105f)
+                        .offset(y = pedalHeight * .17f),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    Canvas(Modifier.size(14.dp)) {
+                        drawCircle(
+                            reverbTint.copy(
+                                alpha = if (block.enabled) pulse else .16f,
+                            ),
+                        )
+                        if (block.enabled) {
+                            drawCircle(
+                                Color.White.copy(alpha = .72f),
+                                radius = size.minDimension * .18f,
+                            )
+                        }
+                    }
+                    Box(
+                        Modifier.size(66.dp).clickable(onClick = toggle),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Image(
+                            painterResource(R.drawable.delay_footswitch_base),
+                            null,
+                            Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Fit,
+                        )
+                        Image(
+                            painterResource(R.drawable.delay_footswitch_cap),
+                            "Activar o desactivar Reverb",
+                            Modifier.fillMaxSize().graphicsLayer {
+                                translationY = switchDepth
+                                scaleX = if (block.enabled) .97f else 1f
+                                scaleY = if (block.enabled) .97f else 1f
+                            },
+                            contentScale = ContentScale.Fit,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReverbFrontKnob(
+    spec: ParameterSpec,
+    label: String,
+    value: Float,
+    change: (ParameterSpec, Float) -> Unit,
+    tint: Color,
+) {
+    val currentValue by rememberUpdatedState(value)
+    val fraction = ((value - spec.range.start) /
+        (spec.range.endInclusive - spec.range.start)).coerceIn(0f, 1f)
+    Column(
+        Modifier.width(116.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        MasterKnob(
+            fraction,
+            tint,
+            Modifier.size(66.dp).pointerInput(spec.key) {
+                detectVerticalDragGestures { event, amount ->
+                    event.consume()
+                    change(
+                        spec,
+                        (currentValue - amount / 210.dp.toPx() *
+                            (spec.range.endInclusive - spec.range.start))
+                            .coerceIn(spec.range),
+                    )
+                }
+            },
+            4f,
+        )
+        Text(
+            label,
+            color = Color.White,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+        )
+        Text(
+            "%.1f".format(value),
+            color = tint,
+            fontSize = 9.sp,
+            maxLines = 1,
+        )
+    }
+}
+
 
 @Composable private fun StageParameter(blockId: String, spec: ParameterSpec, value: Float, tint: Color, change: (Float) -> Unit) {
     var exact by remember(blockId, spec.key) { mutableStateOf(false) }
