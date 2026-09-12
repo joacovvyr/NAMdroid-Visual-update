@@ -526,6 +526,17 @@ private fun DelayDroidEditor(
                     Modifier.fillMaxSize(),
                     contentScale = ContentScale.FillBounds,
                 )
+                DelayModeButton(
+                    "CONTROLES",
+                    { advanced = true },
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(
+                            end = pedalWidth * .022f,
+                            top = pedalHeight * .022f,
+                        )
+                        .zIndex(3f),
+                )
                 Column(
                     Modifier.fillMaxSize().padding(
                         start = pedalWidth * .065f,
@@ -535,19 +546,7 @@ private fun DelayDroidEditor(
                     ),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    Row(
-                        Modifier.fillMaxWidth().height(34.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            "NAMdroid",
-                            color = Color.White,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Spacer(Modifier.weight(1f))
-                        DelayModeButton("CONTROLES", { advanced = true })
-                    }
+                    Spacer(Modifier.height(30.dp))
                     Row(
                         Modifier.weight(.38f).fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceEvenly,
@@ -626,18 +625,18 @@ private fun DelayDroidEditor(
                             }
                         }
                     }
-                    Box(
-                        Modifier.weight(.18f).fillMaxWidth(),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Image(
-                            painterResource(R.drawable.delay_droid_wordmark),
-                            "DELAY-DROID",
-                            Modifier.fillMaxWidth(.42f).heightIn(max = 48.dp),
-                            contentScale = ContentScale.Fit,
-                        )
-                    }
+                    Spacer(Modifier.weight(.18f))
                 }
+                Image(
+                    painterResource(R.drawable.delay_droid_wordmark),
+                    "DELAY-DROID",
+                    Modifier
+                        .align(Alignment.Center)
+                        .offset(y = pedalHeight * .335f)
+                        .width(pedalWidth * .36f)
+                        .height(pedalHeight * .105f),
+                    contentScale = ContentScale.Fit,
+                )
             }
         }
     }
@@ -655,15 +654,15 @@ private fun DelayModeButton(
             .background(Color(0xCC10181A))
             .border(1.dp, Color(0xFF27E9F2), RoundedCornerShape(7.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 13.dp, vertical = 7.dp),
+            .padding(horizontal = 10.dp, vertical = 5.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             label,
             color = Color(0xFF42F5C5),
-            fontSize = 10.sp,
+            fontSize = 9.sp,
             fontWeight = FontWeight.Bold,
-            letterSpacing = .6.sp,
+            letterSpacing = .5.sp,
         )
     }
 }
@@ -723,25 +722,35 @@ private fun DelayLayerButton(label: String, active: Boolean, onClick: () -> Unit
         spring(stiffness = Spring.StiffnessHigh),
         label = "layer-button",
     )
-    Box(
-        Modifier.size(58.dp, 40.dp).graphicsLayer {
-            scaleX = scale
-            scaleY = scale
-            alpha = if (active) 1f else .78f
-        }.clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        Image(
-            painterResource(R.drawable.delay_layer_button),
-            null,
-            Modifier.fillMaxSize(),
-            contentScale = ContentScale.Fit,
-        )
+        Box(
+            Modifier
+                .size(82.dp, 50.dp)
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                    alpha = if (active) 1f else .78f
+                }
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) {
+            Image(
+                painterResource(R.drawable.delay_layer_button),
+                null,
+                Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
+        }
         Text(
             label,
             color = if (active) Color(0xFF27E9F2) else Color.White,
-            fontSize = 9.sp,
+            fontSize = 10.sp,
             fontWeight = FontWeight.Bold,
+            maxLines = 1,
         )
     }
 }
