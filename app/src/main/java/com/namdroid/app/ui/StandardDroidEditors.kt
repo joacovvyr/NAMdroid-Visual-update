@@ -139,7 +139,7 @@ internal fun StandardDroidEditor(
                         row.forEachIndexed { index, spec ->
                             val center = regionStart + step * (index + .5f)
                             FamilyFrontKnob(
-                                spec, spec.label.uppercase(), block.parameters[spec.key] ?: spec.default,
+                                spec, frontLabel(spec), block.parameters[spec.key] ?: spec.default,
                                 style.accent, change,
                                 Modifier.align(Alignment.TopStart)
                                     .offset(x = pedalWidth * center - controlWidth / 2f, y = pedalHeight * y)
@@ -177,7 +177,7 @@ internal fun StandardDroidEditor(
                     Modifier.align(Alignment.TopCenter)
                         .offset(y = pedalHeight * .765f).fillMaxWidth(.62f),
                     color = Color.White,
-                    fontSize = 27.sp,
+                    fontSize = if (style.title.length > 13) 22.sp else 27.sp,
                     fontWeight = FontWeight.Black,
                     fontFamily = FontFamily.SansSerif,
                     letterSpacing = 1.3.sp,
@@ -205,7 +205,7 @@ private fun DetuneFace(
     knobs.forEachIndexed { index, spec ->
         val center = .17f + index * .17f
         FamilyFrontKnob(
-            spec, spec.label.uppercase(), block.parameters[spec.key] ?: spec.default,
+            spec, frontLabel(spec), block.parameters[spec.key] ?: spec.default,
             style.accent, change,
             Modifier.offset(x = pedalWidth * center - knobWidth / 2f, y = pedalHeight * .10f)
                 .size(knobWidth, knobHeight),
@@ -369,7 +369,7 @@ internal fun CabDroidEditor(
                 val controlHeight = height * .34f
                 block.type.parameters.forEachIndexed { index, spec ->
                     FamilyFrontKnob(
-                        spec, spec.label.uppercase(), block.parameters[spec.key] ?: spec.default, accent, change,
+                        spec, frontLabel(spec), block.parameters[spec.key] ?: spec.default, accent, change,
                         Modifier.offset(x = width * (.18f + index * .20f) - controlWidth / 2f, y = height * .07f)
                             .size(controlWidth, controlHeight),
                     )
@@ -405,6 +405,25 @@ internal fun CabDroidEditor(
             }
         }
     }
+}
+
+private fun frontLabel(spec: ParameterSpec): String = when (spec.key) {
+    "lowfreq" -> "LOW FREQ"
+    "midfreq" -> "MID FREQ"
+    "highfreq" -> "HIGH FREQ"
+    "minfreq" -> "MIN FREQ"
+    "maxfreq" -> "MAX FREQ"
+    "threshold" -> "THRESHOLD"
+    "character" -> "CHARACTER"
+    "hysteresis" -> "HYSTERESIS"
+    "sensitivity" -> "SENSITIVITY"
+    "symmetry" -> "SYMMETRY"
+    "direction" -> "DIRECTION"
+    "window" -> "TRACKING"
+    "tight" -> "LOW CUT"
+    "knee" -> "KNEE"
+    "makeup" -> "MAKEUP"
+    else -> spec.label.uppercase()
 }
 
 private fun formatValue(value: Float, unit: String): String = "%.1f%s".format(
