@@ -475,8 +475,19 @@ private fun DelayDroidEditor(
         label = "switch-depth",
     )
 
-    Box(modifier.padding(4.dp), contentAlignment = Alignment.Center) {
-        Image(painterResource(R.drawable.delay_droid_base), null, Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds)
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Image(
+            painterResource(R.drawable.pedal_editor_background),
+            null,
+            Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop,
+        )
+        Image(
+            painterResource(R.drawable.delay_droid_base),
+            null,
+            Modifier.fillMaxSize().padding(4.dp),
+            contentScale = ContentScale.Fit,
+        )
         Column(
             Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 14.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
