@@ -14,7 +14,8 @@ private fun StagePreview() {
             editing = false, running = true, scene = 0, bpm = 120,
             status = "Audio activo · 48000 Hz", inputDb = -18f, outputDb = -12f,
             onSelect = {}, onCloseEditor = {}, onMove = { _, _ -> }, onToggleBlock = {},
-            onParameter = { _, _ -> }, onDelete = {}, onScene = {}, onSaveScene = {},
+            onParameter = { _, _ -> }, onDelete = {}, onDropDelete = {},
+            onUndoDelete = {}, onScene = {}, onSaveScene = {},
             onTap = {}, onRigs = {}, onTone = {}, onAudio = {}, onSettings = {},
             onAdd = {}, onTuner = {}, onLooper = {}, onPickNam = {}, onPickIr = {},
         )
