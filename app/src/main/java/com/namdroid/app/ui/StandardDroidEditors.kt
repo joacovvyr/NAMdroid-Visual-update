@@ -65,6 +65,7 @@ import androidx.compose.ui.unit.sp
 import com.namdroid.app.R
 import kotlin.math.roundToInt
 
+// Shared geometry keeps every non-expression effect aligned across screen sizes.
 private data class DroidStyle(val title: String, val body: Color, val accent: Color)
 
 private fun styleFor(type: BlockType) = when (type) {
