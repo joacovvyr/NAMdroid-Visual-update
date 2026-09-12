@@ -501,7 +501,7 @@ private fun AmpDroidEditor(
             Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 10.dp),
             contentAlignment = Alignment.Center,
         ) {
-            val ampRatio = 1960f / 1028f
+            val ampRatio = 1981f / 793f
             val ampWidth = minOf(maxWidth, maxHeight * ampRatio)
             val ampHeight = ampWidth / ampRatio
             val controlWidth = ampWidth * .078f
@@ -535,8 +535,8 @@ private fun AmpDroidEditor(
                     onClick = pickNam,
                     modifier = Modifier
                         .align(Alignment.TopStart)
-                        .offset(x = ampWidth * .342f, y = ampHeight * .365f)
-                        .size(ampWidth * .329f, ampHeight * .095f),
+                        .offset(x = ampWidth * .340f, y = ampHeight * .466f)
+                        .size(ampWidth * .332f, ampHeight * .105f),
                     color = Color(0xDD05090C),
                     shape = RoundedCornerShape(5.dp),
                     border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF27DCE8)),
@@ -567,8 +567,8 @@ private fun AmpDroidEditor(
                     onClick = tone,
                     modifier = Modifier
                         .align(Alignment.TopStart)
-                        .offset(x = ampWidth * .724f, y = ampHeight * .365f)
-                        .size(ampWidth * .205f, ampHeight * .095f),
+                        .offset(x = ampWidth * .718f, y = ampHeight * .448f)
+                        .size(ampWidth * .207f, ampHeight * .145f),
                     color = Color.Black,
                     shape = RoundedCornerShape(5.dp),
                     border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF27DCE8)),
@@ -584,7 +584,7 @@ private fun AmpDroidEditor(
                 Canvas(
                     Modifier
                         .align(Alignment.TopStart)
-                        .offset(x = ampWidth * .101f, y = ampHeight * .342f)
+                        .offset(x = ampWidth * .102f, y = ampHeight * .442f)
                         .size(11.dp),
                 ) {
                     drawCircle(Color(0xFF27E9F2).copy(alpha = if (block.enabled) pulse else .14f))
@@ -596,17 +596,11 @@ private fun AmpDroidEditor(
                 Box(
                     Modifier
                         .align(Alignment.TopStart)
-                        .offset(x = ampWidth * .076f, y = ampHeight * .378f)
-                        .size(ampWidth * .061f)
+                        .offset(x = ampWidth * .085f, y = ampHeight * .492f)
+                        .size(ampWidth * .040f)
                         .clickable(onClick = toggle),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Image(
-                        painterResource(R.drawable.delay_footswitch_base),
-                        null,
-                        Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Fit,
-                    )
                     Image(
                         painterResource(R.drawable.delay_footswitch_cap),
                         "Activar o desactivar amplificador",
