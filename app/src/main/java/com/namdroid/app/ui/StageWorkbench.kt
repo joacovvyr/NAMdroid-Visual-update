@@ -76,6 +76,29 @@ fun StageWorkbench(
     var confirmScene by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     val selected = blocks.firstOrNull { it.id == selectedId }
+
+    // Full-screen pedal editors are a separate navigation surface. They must
+    // never inherit the measurement constraints of the legacy split editor.
+    if (editing && selected?.type == BlockType.DELAY) {
+        BackHandler(foreground) { onCloseEditor() }
+        Box(Modifier.fillMaxSize().background(StageBlack).safeDrawingPadding()) {
+            DelayDroidEditor(
+                Modifier.fillMaxSize(),
+                selected,
+                onParameter,
+                { onToggleBlock(selected.id) },
+            )
+            IconButton(
+                onCloseEditor,
+                Modifier.align(Alignment.TopStart).zIndex(5f)
+                    .background(Color.Black.copy(alpha = .42f), CircleShape),
+            ) {
+                Icon(Icons.Default.ArrowBack, "Volver a la cadena", tint = Color.White)
+            }
+        }
+        return
+    }
+
     BackHandler(foreground && (editing || live)) { if (editing) onCloseEditor() else live = false }
     Column(Modifier.fillMaxSize().background(StageBlack).safeDrawingPadding()) {
         Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).background(StageSurface).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
