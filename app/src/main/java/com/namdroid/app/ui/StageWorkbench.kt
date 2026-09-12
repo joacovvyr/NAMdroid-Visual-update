@@ -895,8 +895,10 @@ private fun ReverbDroidEditor(
                         tint = reverbTint,
                         modifier = Modifier
                             .align(Alignment.CenterStart)
-                            .padding(start = pedalWidth * .09f)
-                            .offset(y = pedalHeight * .155f),
+                            .padding(start = pedalWidth * .075f)
+                            .offset(y = pedalHeight * .115f)
+                            .width(pedalWidth * .58f)
+                            .height(pedalHeight * .23f),
                     )
                 }
                 Image(
@@ -1017,34 +1019,25 @@ private fun ReverbModeSelector(
     val modes = listOf("ROOM", "HALL", "PLATE", "SHIMMER", "AMBIENT")
     val currentValue by rememberUpdatedState(value)
     val selected = value.roundToInt().coerceIn(0, modes.lastIndex)
-    Box(modifier.size(300.dp, 126.dp), contentAlignment = Alignment.Center) {
-        fun labelModifier(index: Int): Modifier = when (index) {
-            0 -> Modifier.align(Alignment.BottomStart)
-            1 -> Modifier.align(Alignment.CenterStart).offset(x = 30.dp, y = (-29).dp)
-            2 -> Modifier.align(Alignment.TopCenter)
-            3 -> Modifier.align(Alignment.CenterEnd).offset(x = (-22).dp, y = (-29).dp)
-            else -> Modifier.align(Alignment.BottomEnd)
-        }
-        modes.forEachIndexed { index, label ->
-            Text(
-                label,
-                modifier = labelModifier(index)
-                    .clip(RoundedCornerShape(5.dp))
-                    .clickable { change(spec, index.toFloat()) }
-                    .padding(horizontal = 5.dp, vertical = 3.dp),
-                color = if (index == selected) tint else Color.White.copy(alpha = .72f),
-                fontSize = 8.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
+
+    Row(
+        modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color.Black.copy(alpha = .18f))
+            .border(
+                1.dp,
+                Color.White.copy(alpha = .10f),
+                RoundedCornerShape(12.dp),
             )
-        }
+            .padding(horizontal = 10.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
         MasterKnob(
             selected / 4f,
             tint,
             Modifier
-                .align(Alignment.Center)
-                .offset(y = 8.dp)
-                .size(68.dp)
+                .size(66.dp)
                 .pointerInput(spec.key) {
                     var accumulated = 0f
                     detectVerticalDragGestures(
@@ -1064,16 +1057,67 @@ private fun ReverbModeSelector(
                 },
             4f,
         )
-        Text(
-            "TYPE",
-            Modifier.align(Alignment.Center).offset(y = 54.dp),
-            color = Color.White,
-            fontSize = 9.sp,
-            fontWeight = FontWeight.Bold,
-        )
+        Column(
+            Modifier.weight(1f),
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "TYPE",
+                    color = Color.White.copy(alpha = .72f),
+                    fontSize = 8.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                Spacer(Modifier.width(7.dp))
+                Text(
+                    modes[selected],
+                    color = tint,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Black,
+                    maxLines = 1,
+                )
+            }
+            Spacer(Modifier.height(5.dp))
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                modes.forEachIndexed { index, label ->
+                    val active = index == selected
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .height(27.dp)
+                            .clip(RoundedCornerShape(5.dp))
+                            .background(
+                                if (active) tint.copy(alpha = .20f)
+                                else Color.Black.copy(alpha = .24f),
+                            )
+                            .border(
+                                1.dp,
+                                if (active) tint
+                                else Color.White.copy(alpha = .16f),
+                                RoundedCornerShape(5.dp),
+                            )
+                            .clickable { change(spec, index.toFloat()) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            label,
+                            color = if (active) tint else Color.White.copy(alpha = .78f),
+                            fontSize = if (label.length > 6) 6.sp else 7.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+        }
     }
 }
-
 
 @Composable private fun StageParameter(blockId: String, spec: ParameterSpec, value: Float, tint: Color, change: (Float) -> Unit) {
     var exact by remember(blockId, spec.key) { mutableStateOf(false) }
