@@ -381,23 +381,22 @@ fun StageWorkbench(
                 IconButton(delete) { Icon(Icons.Default.DeleteOutline, "Quitar efecto") }
             }
         }
-        if (block.type == BlockType.DELAY) {
-            DelayDroidEditor(Modifier.weight(1f).fillMaxWidth(), block, change, toggle)
-        } else {
-            Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Surface(
-                    modifier = Modifier.weight(.36f).fillMaxHeight(),
-                    color = StageSurface,
-                    shape = RoundedCornerShape(12.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, StageLine),
-                ) {
-                    GearFace(block, Modifier.fillMaxSize().padding(8.dp), large = true, change = change)
-                }
-                LazyVerticalGrid(columns = GridCells.Adaptive(170.dp), modifier = Modifier.weight(.64f).fillMaxHeight(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 8.dp)) {
-                    items(block.type.parameters, key = { it.key }) { spec -> StageParameter(block.id, spec, block.parameters[spec.key] ?: spec.default, block.type.color) { change(spec, it) } }
-                }
+        // Stable fallback: the full-screen Delay-Droid compositor remains
+        // isolated below, but is not entered until its device-only crash is
+        // reproduced with diagnostics. Delay keeps all DSP and parameters.
+        Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Surface(
+                modifier = Modifier.weight(.36f).fillMaxHeight(),
+                color = StageSurface,
+                shape = RoundedCornerShape(12.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, StageLine),
+            ) {
+                GearFace(block, Modifier.fillMaxSize().padding(8.dp), large = true, change = change)
             }
+            LazyVerticalGrid(columns = GridCells.Adaptive(170.dp), modifier = Modifier.weight(.64f).fillMaxHeight(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 8.dp)) {
+                items(block.type.parameters, key = { it.key }) { spec -> StageParameter(block.id, spec, block.parameters[spec.key] ?: spec.default, block.type.color) { change(spec, it) } }
             }
+        }
     }
 }
 
