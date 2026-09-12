@@ -96,6 +96,26 @@ fun StageWorkbench(
         }
     }
 
+    if (editing && selected?.type == BlockType.GATE) {
+        BackHandler(foreground) { onCloseEditor() }
+        Box(Modifier.fillMaxSize().background(StageBlack).safeDrawingPadding()) {
+            GateDroidEditor(
+                modifier = Modifier.fillMaxSize(),
+                block = selected,
+                change = onParameter,
+                toggle = { onToggleBlock(selected.id) },
+            )
+            IconButton(
+                onCloseEditor,
+                Modifier.align(Alignment.TopStart).zIndex(5f)
+                    .background(Color.Black.copy(alpha = .42f), CircleShape),
+            ) {
+                Icon(Icons.Default.ArrowBack, "Volver a la cadena", tint = Color.White)
+            }
+        }
+        return
+    }
+
     // AMP-DROID uses a fixed-ratio compositor so every interactive layer
     // stays registered to the approved amplifier artwork on every screen.
     if (editing && selected?.type == BlockType.AMP) {
@@ -649,6 +669,189 @@ private fun StageChain(
             LazyVerticalGrid(columns = GridCells.Adaptive(170.dp), modifier = Modifier.weight(.64f).fillMaxHeight(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 8.dp)) {
                 items(block.type.parameters, key = { it.key }) { spec -> StageParameter(block.id, spec, block.parameters[spec.key] ?: spec.default, block.type.color) { change(spec, it) } }
             }
+        }
+    }
+}
+
+@Composable
+private fun GateDroidEditor(
+    modifier: Modifier,
+    block: PedalBlock,
+    change: (ParameterSpec, Float) -> Unit,
+    toggle: () -> Unit,
+) {
+    val specs = remember(block.type) { block.type.parameters.associateBy { it.key } }
+    val controls = remember(specs) {
+        listOf(
+            "threshold" to "THRESHOLD",
+            "release" to "RELEASE",
+            "attack" to "ATTACK",
+            "hold" to "HOLD",
+            "range" to "REDUCTION",
+            "hysteresis" to "HYSTERESIS",
+        ).mapNotNull { (key, label) -> specs[key]?.let { Triple(key, label, it) } }
+    }
+    val centers = remember { listOf(.13f, .278f, .426f, .574f, .722f, .87f) }
+    val pulse = rememberInfiniteTransition(label = "gate-led").animateFloat(
+        initialValue = .32f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            tween(680, easing = FastOutSlowInEasing),
+            RepeatMode.Reverse,
+        ),
+        label = "gate-led-alpha",
+    ).value
+    val switchDepth by animateFloatAsState(
+        if (block.enabled) 3f else 0f,
+        spring(stiffness = Spring.StiffnessMedium),
+        label = "gate-switch-depth",
+    )
+
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Image(
+            painterResource(R.drawable.pedal_editor_background),
+            null,
+            Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop,
+        )
+        BoxWithConstraints(
+            Modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 12.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            val pedalWidth = minOf(maxWidth, maxHeight * (16f / 9f))
+            val pedalHeight = pedalWidth * (9f / 16f)
+            val controlWidth = pedalWidth * .128f
+            val controlHeight = pedalHeight * .36f
+
+            Box(Modifier.size(pedalWidth, pedalHeight)) {
+                Image(
+                    painterResource(R.drawable.gate_droid_base),
+                    null,
+                    Modifier.fillMaxSize(),
+                    contentScale = ContentScale.FillBounds,
+                )
+
+                controls.forEachIndexed { index, (key, label, spec) ->
+                    GateFrontKnob(
+                        spec = spec,
+                        label = label,
+                        value = block.parameters[key] ?: spec.default,
+                        change = change,
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .offset(
+                                x = pedalWidth * centers[index] - controlWidth / 2f,
+                                y = pedalHeight * .115f,
+                            )
+                            .size(controlWidth, controlHeight),
+                    )
+                }
+
+                Canvas(
+                    Modifier
+                        .align(Alignment.TopStart)
+                        .offset(x = pedalWidth * .846f, y = pedalHeight * .555f)
+                        .size(12.dp),
+                ) {
+                    drawCircle(Color.White.copy(alpha = if (block.enabled) pulse else .14f))
+                    if (block.enabled) {
+                        drawCircle(Color.White, radius = size.minDimension * .20f)
+                    }
+                }
+
+                Box(
+                    Modifier
+                        .align(Alignment.TopStart)
+                        .offset(x = pedalWidth * .815f, y = pedalHeight * .605f)
+                        .size(pedalWidth * .090f)
+                        .clickable(onClick = toggle),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Image(
+                        painterResource(R.drawable.delay_footswitch_base),
+                        null,
+                        Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Fit,
+                    )
+                    Image(
+                        painterResource(R.drawable.delay_footswitch_cap),
+                        "Activar o desactivar Gate",
+                        Modifier.fillMaxSize().graphicsLayer {
+                            translationY = switchDepth
+                            scaleX = if (block.enabled) .97f else 1f
+                            scaleY = if (block.enabled) .97f else 1f
+                        },
+                        contentScale = ContentScale.Fit,
+                    )
+                }
+
+                Image(
+                    painterResource(R.drawable.gate_droid_wordmark),
+                    "GATE-DROID",
+                    Modifier
+                        .align(Alignment.TopStart)
+                        .offset(x = pedalWidth * .30f, y = pedalHeight * .735f)
+                        .size(pedalWidth * .40f, pedalHeight * .105f),
+                    contentScale = ContentScale.Fit,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun GateFrontKnob(
+    spec: ParameterSpec,
+    label: String,
+    value: Float,
+    change: (ParameterSpec, Float) -> Unit,
+    modifier: Modifier,
+) {
+    val currentValue by rememberUpdatedState(value)
+    val fraction = ((value - spec.range.start) /
+        (spec.range.endInclusive - spec.range.start)).coerceIn(0f, 1f)
+
+    BoxWithConstraints(modifier, contentAlignment = Alignment.TopCenter) {
+        val knobSize = minOf(maxWidth * .62f, maxHeight * .52f)
+        Column(
+            Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                "${"%.1f".format(value)} ${spec.unit}",
+                color = Color.White,
+                fontSize = 8.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(1.dp))
+            MasterKnob(
+                fraction,
+                Color(0xFFD7DEE3),
+                Modifier
+                    .size(knobSize)
+                    .pointerInput(spec.key) {
+                        detectVerticalDragGestures { event, amount ->
+                            event.consume()
+                            change(
+                                spec,
+                                (currentValue - amount / 210.dp.toPx() *
+                                    (spec.range.endInclusive - spec.range.start))
+                                    .coerceIn(spec.range),
+                            )
+                        }
+                    },
+                2.6f,
+            )
+            Spacer(Modifier.height(1.dp))
+            Text(
+                label,
+                color = Color(0xFFE6E9EC),
+                fontSize = 8.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
