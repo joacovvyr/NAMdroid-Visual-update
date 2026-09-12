@@ -819,6 +819,7 @@ private fun ReverbDroidEditor(
             "mix" to "MIX",
         ).mapNotNull { (key, label) -> specs[key]?.let { Triple(key, label, it) } }
     }
+    val modeSpec = specs["mode"]
     val pulse = rememberInfiniteTransition(label = "reverb-led").animateFloat(
         initialValue = .38f,
         targetValue = 1f,
@@ -871,7 +872,7 @@ private fun ReverbDroidEditor(
                 Row(
                     Modifier
                         .align(Alignment.TopCenter)
-                        .padding(top = pedalHeight * .14f)
+                        .padding(top = pedalHeight * .205f)
                         .fillMaxWidth(.62f),
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically,
@@ -886,14 +887,26 @@ private fun ReverbDroidEditor(
                         )
                     }
                 }
+                modeSpec?.let { spec ->
+                    ReverbModeSelector(
+                        spec = spec,
+                        value = block.parameters[spec.key] ?: spec.default,
+                        change = change,
+                        tint = reverbTint,
+                        modifier = Modifier
+                            .align(Alignment.CenterStart)
+                            .padding(start = pedalWidth * .09f)
+                            .offset(y = pedalHeight * .155f),
+                    )
+                }
                 Image(
                     painterResource(R.drawable.reverb_droid_wordmark),
                     "REVERB-DROID",
                     Modifier
                         .align(Alignment.Center)
                         .offset(y = pedalHeight * .335f)
-                        .width(pedalWidth * .39f)
-                        .height(pedalHeight * .105f),
+                        .width(pedalWidth * .43f)
+                        .height(pedalHeight * .12f),
                     contentScale = ContentScale.Fit,
                 )
                 Column(
@@ -988,6 +1001,75 @@ private fun ReverbFrontKnob(
             color = tint,
             fontSize = 9.sp,
             maxLines = 1,
+        )
+    }
+}
+
+
+@Composable
+private fun ReverbModeSelector(
+    spec: ParameterSpec,
+    value: Float,
+    change: (ParameterSpec, Float) -> Unit,
+    tint: Color,
+    modifier: Modifier = Modifier,
+) {
+    val modes = listOf("ROOM", "HALL", "PLATE", "SHIMMER", "AMBIENT")
+    val currentValue by rememberUpdatedState(value)
+    val selected = value.roundToInt().coerceIn(0, modes.lastIndex)
+    Box(modifier.size(300.dp, 126.dp), contentAlignment = Alignment.Center) {
+        fun labelModifier(index: Int): Modifier = when (index) {
+            0 -> Modifier.align(Alignment.BottomStart)
+            1 -> Modifier.align(Alignment.CenterStart).offset(x = 30.dp, y = (-29).dp)
+            2 -> Modifier.align(Alignment.TopCenter)
+            3 -> Modifier.align(Alignment.CenterEnd).offset(x = (-22).dp, y = (-29).dp)
+            else -> Modifier.align(Alignment.BottomEnd)
+        }
+        modes.forEachIndexed { index, label ->
+            Text(
+                label,
+                modifier = labelModifier(index)
+                    .clip(RoundedCornerShape(5.dp))
+                    .clickable { change(spec, index.toFloat()) }
+                    .padding(horizontal = 5.dp, vertical = 3.dp),
+                color = if (index == selected) tint else Color.White.copy(alpha = .72f),
+                fontSize = 8.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+            )
+        }
+        MasterKnob(
+            selected / 4f,
+            tint,
+            Modifier
+                .align(Alignment.Center)
+                .offset(y = 8.dp)
+                .size(68.dp)
+                .pointerInput(spec.key) {
+                    var accumulated = 0f
+                    detectVerticalDragGestures(
+                        onDragStart = { accumulated = 0f },
+                    ) { event, amount ->
+                        event.consume()
+                        accumulated -= amount
+                        val stepSize = 28.dp.toPx()
+                        val steps = (accumulated / stepSize).toInt()
+                        if (steps != 0) {
+                            val next = (currentValue.roundToInt() + steps)
+                                .coerceIn(0, modes.lastIndex)
+                            change(spec, next.toFloat())
+                            accumulated -= steps * stepSize
+                        }
+                    }
+                },
+            4f,
+        )
+        Text(
+            "TYPE",
+            Modifier.align(Alignment.Center).offset(y = 54.dp),
+            color = Color.White,
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Bold,
         )
     }
 }
