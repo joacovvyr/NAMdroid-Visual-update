@@ -711,7 +711,7 @@ private fun AmpDroidEditor(
             val ampWidth = minOf(maxWidth, maxHeight * ampRatio)
             val ampHeight = ampWidth / ampRatio
             val controlWidth = ampWidth * .078f
-            val controlHeight = ampHeight * .245f
+            val controlHeight = ampHeight * .280f
 
             Box(Modifier.size(ampWidth, ampHeight)) {
                 Image(
@@ -731,7 +731,7 @@ private fun AmpDroidEditor(
                             .align(Alignment.TopStart)
                             .offset(
                                 x = ampWidth * centers[index] - controlWidth / 2f,
-                                y = ampHeight * .180f,
+                                y = ampHeight * .135f,
                             )
                             .size(controlWidth, controlHeight),
                     )
@@ -836,13 +836,14 @@ private fun AmpFrontKnob(
         (spec.range.endInclusive - spec.range.start)).coerceIn(0f, 1f)
 
     BoxWithConstraints(modifier, contentAlignment = Alignment.TopCenter) {
-        val knobSize = minOf(maxWidth * .76f, maxHeight * .53f)
+        val knobSize = minOf(maxWidth * .72f, maxHeight * .46f)
         Column(
             Modifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
                 "${"%.1f".format(value)} ${spec.unit}",
+                modifier = Modifier.offset(y = 5.dp),
                 color = Color(0xFF48E8EE),
                 fontSize = 7.sp,
                 maxLines = 1,
@@ -870,6 +871,7 @@ private fun AmpFrontKnob(
             Spacer(Modifier.height(2.dp))
             Text(
                 label,
+                modifier = Modifier.offset(y = (-5).dp),
                 color = Color.White,
                 fontSize = 7.sp,
                 fontWeight = FontWeight.Bold,
