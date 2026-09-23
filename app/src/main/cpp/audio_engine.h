@@ -4,6 +4,7 @@
 #include <array>
 #include <chrono>
 #include <complex>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -86,6 +87,10 @@ private:
     static constexpr int32_t kMaxEffectParams = 11;
     static constexpr size_t kTunerBufferFrames = 4096;
     static constexpr size_t kTransitionFrames = 256;
+    // FIFO SPSC entre callbacks de entrada y salida. Potencia de dos para
+    // indexar sin division en los dos hilos de audio.
+    static constexpr size_t kInputRingFrames = 16384;
+    static constexpr size_t kInputRingMask = kInputRingFrames - 1;
 
     void tunerWorkerLoop();
     void analyseTunerBuffer(const std::array<float, kTunerBufferFrames> &samples);
@@ -200,7 +205,16 @@ private:
     std::vector<float> mDspInPtrStorage;
     std::vector<float> mDspOutPtrStorage;
     std::vector<float> mMonoResult;        // salida mono antes de "upmix"
-    std::vector<float> mInterleavedScratch; // lectura/escritura cruda multicanal
+    std::vector<float> mInterleavedScratch; // escritura cruda multicanal
+    std::array<float, kInputRingFrames> mInputRing{};
+    std::atomic<uint64_t> mInputRingWrite{0};
+    std::atomic<uint64_t> mInputRingRead{0};
+    std::atomic<int32_t> mInputTargetFrames{128};
+    std::atomic<uint32_t> mInputUnderflowCount{0};
+    float mLastInputSample{0.0f};
+    float mInputRecoveryGain{0.0f};
+    float mGainSmoothingCoefficient{0.002f};
+    uint32_t mCallbackCounter{0};
     std::vector<float> mDelayBuffer;
     std::vector<float> mReverbBuffer;
     std::array<std::vector<float>, 4> mReverbCombs;
