@@ -1206,10 +1206,12 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *stream,
                 if (tremoloPhase >= 6.2831853f) tremoloPhase -= 6.2831853f;
             }
         } else if ((effect == 13 || effect == 14) && pitchBuffer.size() > 4) {
-            // DETUNE emula el selector discreto de un pedal Drop: 0, -1…-7 y
-            // octava. PITCH conserva su recorrido continuo y fine tuning.
-            const float selectedDrop = std::round(std::clamp(parameter(0), 0.0f, 8.0f));
-            const float detuneSemitones = selectedDrop >= 8.0f ? -12.0f : -selectedDrop;
+            // DETUNE usa posiciones discretas: UP +2/+1, standard, -1…-7 y
+            // octava abajo. Los valores 0..8 conservan compatibilidad con rigs
+            // guardados; -1/-2 representan las dos posiciones UP nuevas.
+            const float selectedDrop = std::round(std::clamp(parameter(0), -2.0f, 8.0f));
+            const float detuneSemitones = selectedDrop < 0.0f ? -selectedDrop :
+                (selectedDrop >= 8.0f ? -12.0f : -selectedDrop);
             const float semitones = effect == 14 ? detuneSemitones :
                 std::clamp(parameter(0) + parameter(1) / 100.0f, -12.0f, 12.0f);
             if (std::abs(semitones) < 0.001f) continue;

@@ -96,7 +96,9 @@ enum class BlockType(val label: String, val shortLabel: String, val category: St
         ParameterSpec("tone", "Tone", 0f..100f, 75f, "%", 4),
         ParameterSpec("level", "Level", -12f..12f, 0f, "dB", 5))),
     DETUNE("Drop Detune", "DETUNE", "Pitch", Color(0xFF1677FF), 14, listOf(
-        ParameterSpec("drop", "Drop Tuning", 0f..8f, 2f, "step", 0),
+        // -2/-1 are UP +2/+1. 0 is standard. 1..7 are drop semitones and
+        // 8 keeps the existing octave-down position for saved rigs.
+        ParameterSpec("drop", "Drop / Up Tuning", -2f..8f, 2f, "step", 0),
         ParameterSpec("mix", "Mix", 0f..100f, 100f, "%", 1),
         ParameterSpec("window", "Tracking / Window", 18f..90f, 52f, "ms", 2),
         ParameterSpec("tone", "Tone", 0f..100f, 78f, "%", 3),
