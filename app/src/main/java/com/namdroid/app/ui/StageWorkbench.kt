@@ -11,6 +11,7 @@ import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyHorizontalGrid
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
@@ -30,15 +31,14 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.ContentScale
@@ -75,7 +75,14 @@ fun StageWorkbench(
     onAdd: () -> Unit, onTuner: () -> Unit, onLooper: () -> Unit,
     onPickNam: () -> Unit, onPickIr: () -> Unit, foreground: Boolean = true,
 ) {
+    val context = LocalContext.current
+    val stagePreferences = remember(context) {
+        context.getSharedPreferences("namdroid_stage_layout", 0)
+    }
     var live by rememberSaveable { mutableStateOf(false) }
+    var chainRows by rememberSaveable {
+        mutableStateOf(stagePreferences.getInt("chain_rows", 2).coerceIn(1, 2))
+    }
     var tools by remember { mutableStateOf(false) }
     var overflow by remember { mutableStateOf(false) }
     var confirmScene by remember { mutableStateOf(false) }
@@ -259,6 +266,11 @@ fun StageWorkbench(
                 blocks,
                 selectedId,
                 live,
+                chainRows,
+                { rows ->
+                    chainRows = rows.coerceIn(1, 2)
+                    stagePreferences.edit().putInt("chain_rows", chainRows).apply()
+                },
                 onSelect,
                 onToggleBlock,
                 onMove,
@@ -319,6 +331,8 @@ private fun StageChain(
     blocks: List<PedalBlock>,
     selectedId: String,
     live: Boolean,
+    preferredRows: Int,
+    onPreferredRows: (Int) -> Unit,
     select: (String) -> Unit,
     toggle: (String) -> Unit,
     move: (Int, Int) -> Unit,
@@ -365,24 +379,36 @@ private fun StageChain(
             .fillMaxWidth()
             .onGloballyPositioned { chainBounds = it.boundsInRoot() },
     ) {
-        val columns = (maxWidth.value / if (live) 150f else 114f).toInt().coerceIn(2, 6)
-        val rows = (blocks.size + columns - 1) / columns
-        val cellHeight = ((maxHeight - 26.dp) / rows.coerceAtLeast(1) - 8.dp)
-            .coerceIn(86.dp, if (live) 150.dp else 132.dp)
+        val requestedRows = preferredRows.coerceIn(1, 2)
+        val rows = requestedRows.coerceAtMost(blocks.size.coerceAtLeast(1))
+        val availableCellHeight = ((maxHeight - 34.dp - 8.dp * (rows - 1)) / rows)
+            .coerceAtLeast(76.dp)
+        val cellWidth = (availableCellHeight * (16f / 9f))
+            .coerceIn(if (rows == 1) 150.dp else 124.dp, if (live) 250.dp else 220.dp)
         Column(Modifier.fillMaxSize().padding(horizontal = 10.dp)) {
-            Text(
-                if (live) "LIVE  /  Tocá para activar · Mantené para editar"
-                else "SIGNAL PATH  /  Tocá para editar · Arrastrá para reordenar",
-                color = Color(0xFFADB8C4),
-                fontSize = 10.sp,
-                modifier = Modifier.padding(vertical = 5.dp),
-            )
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(columns),
+            Row(
+                Modifier.fillMaxWidth().height(34.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    if (live) "LIVE  /  Tocá para activar · Mantené para editar"
+                    else "SIGNAL PATH  /  Tocá para editar · Arrastrá para reordenar",
+                    color = Color(0xFFADB8C4),
+                    fontSize = 10.sp,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                ChainRowsButton("1 FILA", requestedRows == 1) { onPreferredRows(1) }
+                Spacer(Modifier.width(4.dp))
+                ChainRowsButton("2 FILAS", requestedRows == 2) { onPreferredRows(2) }
+            }
+            LazyHorizontalGrid(
+                rows = GridCells.Fixed(rows),
                 modifier = Modifier.weight(1f),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = PaddingValues(bottom = 4.dp),
+                contentPadding = PaddingValues(end = 6.dp, bottom = 4.dp),
             ) {
                 items(blocks, key = { it.id }) { block ->
                     val position = blocks.indexOfFirst { it.id == block.id }
@@ -461,7 +487,7 @@ private fun StageChain(
                         position,
                         block.id == selectedId,
                         live,
-                        dragModifier.height(cellHeight),
+                        dragModifier.width(cellWidth).fillMaxHeight(),
                     ) {
                         if (live && block.type.engineId != null) toggle(block.id)
                         else select(block.id)
@@ -513,6 +539,27 @@ private fun StageChain(
     }
 }
 
+@Composable
+private fun ChainRowsButton(label: String, selected: Boolean, click: () -> Unit) {
+    Surface(
+        onClick = click,
+        shape = RoundedCornerShape(5.dp),
+        color = if (selected) StageAccent.copy(alpha = .22f) else StageSurface,
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            if (selected) StageAccent else StageLine,
+        ),
+    ) {
+        Text(
+            label,
+            Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+            color = if (selected) StageAccent else Color(0xFFADB8C4),
+            fontSize = 8.sp,
+            fontWeight = FontWeight.Bold,
+        )
+    }
+}
+
 @Composable private fun StageTile(block: PedalBlock, position: Int, selected: Boolean, live: Boolean, modifier: Modifier, click: () -> Unit) {
     val tint = block.type.color
     val endpoint = block.type == BlockType.INPUT || block.type == BlockType.OUTPUT
@@ -544,27 +591,70 @@ private fun StageChain(
     val isPedal = block.type !in setOf(BlockType.INPUT, BlockType.OUTPUT, BlockType.AMP, BlockType.IR)
     val expressionPedal = block.type == BlockType.WAH || block.type == BlockType.PITCH
     val detunePedal = block.type == BlockType.DETUNE
-    val resource = when (block.type) {
-        BlockType.AMP -> R.drawable.amp
-        BlockType.IR -> R.drawable.cab
-        BlockType.COMPRESSOR -> R.drawable.pedal_comp
-        BlockType.GATE -> R.drawable.pedal_gate
-        BlockType.DRIVE -> R.drawable.pedal_drive
-        BlockType.EQ -> R.drawable.pedal_eq
-        BlockType.CHORUS -> R.drawable.pedal_chorus
-        BlockType.DELAY -> R.drawable.pedal_delay
-        BlockType.REVERB -> R.drawable.pedal_reverb
+    val chassisResource = when (block.type) {
+        BlockType.AMP -> R.drawable.amp_droid_base
+        BlockType.IR -> R.drawable.droid_chassis_cab
+        BlockType.COMPRESSOR -> R.drawable.droid_chassis_comp
+        BlockType.GATE -> R.drawable.droid_chassis_gate
+        BlockType.DRIVE -> R.drawable.droid_chassis_drive
+        BlockType.EQ -> R.drawable.droid_chassis_eq
+        BlockType.CHORUS -> R.drawable.droid_chassis_chorus
+        BlockType.DELAY -> R.drawable.delay_droid_base
+        BlockType.REVERB -> R.drawable.reverb_droid_base
+        BlockType.AUTO_WAH -> R.drawable.droid_chassis_auto_wah
+        BlockType.TREMOLO -> R.drawable.droid_chassis_tremolo
+        BlockType.DETUNE -> R.drawable.droid_chassis_detune
+        else -> null
+    }
+    val legacyResource = when (block.type) {
         BlockType.WAH -> R.drawable.pedal_wah
-        BlockType.AUTO_WAH -> R.drawable.pedal_auto_wah
-        BlockType.TREMOLO -> R.drawable.pedal_tremolo
         BlockType.PITCH -> R.drawable.pedal_pitch
-        BlockType.DETUNE -> R.drawable.pedal_detune
         else -> R.drawable.pedal_gate
     }
     Box(modifier.padding(vertical = 3.dp), contentAlignment = Alignment.Center) {
+        if (chassisResource != null) {
+            Box(
+                Modifier.fillMaxWidth(.97f).aspectRatio(16f / 9f),
+                contentAlignment = Alignment.Center,
+            ) {
+                Image(
+                    painterResource(chassisResource),
+                    null,
+                    Modifier.fillMaxSize(),
+                    contentScale = ContentScale.FillBounds,
+                )
+                Row(
+                    Modifier.align(Alignment.TopCenter).offset(y = if (large) 18.dp else 8.dp)
+                        .fillMaxWidth(.48f),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                ) {
+                    block.type.parameters.take(3).forEach { spec ->
+                        val value = block.parameters[spec.key] ?: spec.default
+                        val fraction = ((value - spec.range.start) /
+                            (spec.range.endInclusive - spec.range.start)).coerceIn(0f, 1f)
+                        MasterKnob(
+                            fraction,
+                            block.type.color,
+                            Modifier.size(if (large) 26.dp else 13.dp),
+                            if (large) 2f else 1f,
+                        )
+                    }
+                }
+                Text(
+                    droidChainTitle(block.type),
+                    Modifier.align(Alignment.BottomCenter).padding(bottom = if (large) 14.dp else 5.dp),
+                    color = Color.White,
+                    fontSize = if (large) 14.sp else 7.sp,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = if (large) 1.sp else .4.sp,
+                    maxLines = 1,
+                )
+            }
+            return@Box
+        }
         if (block.type !in setOf(BlockType.INPUT, BlockType.OUTPUT)) {
             Image(
-                painterResource(resource),
+                painterResource(legacyResource),
                 null,
                 if (isPedal) Modifier.fillMaxHeight(.88f).aspectRatio(2f / 3f) else Modifier.fillMaxSize(.9f),
                 contentScale = ContentScale.Fit
@@ -663,6 +753,22 @@ private fun StageChain(
             }
         }
     }
+}
+
+private fun droidChainTitle(type: BlockType) = when (type) {
+    BlockType.COMPRESSOR -> "COMP-DROID"
+    BlockType.GATE -> "GATE-DROID"
+    BlockType.DRIVE -> "DRIVE-DROID"
+    BlockType.EQ -> "EQ-DROID"
+    BlockType.CHORUS -> "CHORUS-DROID"
+    BlockType.DELAY -> "DELAY-DROID"
+    BlockType.REVERB -> "REVERB-DROID"
+    BlockType.AUTO_WAH -> "AUTO-WAH-DROID"
+    BlockType.TREMOLO -> "TREMOLO-DROID"
+    BlockType.DETUNE -> "DETUNE-DROID"
+    BlockType.AMP -> "AMP-DROID"
+    BlockType.IR -> "CAB-DROID"
+    else -> type.shortLabel
 }
 
 @Composable private fun GearKnob(spec: ParameterSpec, value: Float, tint: Color, large: Boolean, change: ((Float) -> Unit)?) {
@@ -778,7 +884,7 @@ private fun GateDroidEditor(
 
             Box(Modifier.size(pedalWidth, pedalHeight)) {
                 Image(
-                    painterResource(R.drawable.gate_droid_base),
+                    painterResource(R.drawable.droid_chassis_gate),
                     null,
                     Modifier.fillMaxSize(),
                     contentScale = ContentScale.FillBounds,

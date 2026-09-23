@@ -47,9 +47,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
@@ -69,17 +67,28 @@ import kotlin.math.roundToInt
 // Shared geometry keeps every non-expression effect aligned across screen sizes.
 private val DroidTitleFont = FontFamily(Font(R.font.droid_wordmark, FontWeight.Bold))
 
-private data class DroidStyle(val title: String, val body: Color, val accent: Color)
+private data class DroidStyle(val title: String, val accent: Color)
 
 private fun styleFor(type: BlockType) = when (type) {
-    BlockType.COMPRESSOR -> DroidStyle("COMP-DROID", Color(0xFFAA741D), Color(0xFFFFD166))
-    BlockType.DRIVE -> DroidStyle("DRIVE-DROID", Color(0xFFAE3E1B), Color(0xFFFF8A3D))
-    BlockType.EQ -> DroidStyle("EQ-DROID", Color(0xFF56318B), Color(0xFFD59AFF))
-    BlockType.CHORUS -> DroidStyle("CHORUS-DROID", Color(0xFF176D83), Color(0xFF7BE7F6))
-    BlockType.AUTO_WAH -> DroidStyle("AUTO-WAH-DROID", Color(0xFF9A7416), Color(0xFFFFD85A))
-    BlockType.TREMOLO -> DroidStyle("TREMOLO-DROID", Color(0xFF8D2832), Color(0xFFFF6C78))
-    BlockType.DETUNE -> DroidStyle("DETUNE-DROID", Color(0xFF1E568E), Color(0xFF65B7FF))
-    else -> DroidStyle(type.shortLabel + "-DROID", Color(0xFF555B61), Color.White)
+    BlockType.COMPRESSOR -> DroidStyle("COMP-DROID", Color(0xFFFFD166))
+    BlockType.DRIVE -> DroidStyle("DRIVE-DROID", Color(0xFFFF8A3D))
+    BlockType.EQ -> DroidStyle("EQ-DROID", Color(0xFFD59AFF))
+    BlockType.CHORUS -> DroidStyle("CHORUS-DROID", Color(0xFF7BE7F6))
+    BlockType.AUTO_WAH -> DroidStyle("AUTO-WAH-DROID", Color(0xFFFFD85A))
+    BlockType.TREMOLO -> DroidStyle("TREMOLO-DROID", Color(0xFFFF6C78))
+    BlockType.DETUNE -> DroidStyle("DETUNE-DROID", Color(0xFF65B7FF))
+    else -> DroidStyle(type.shortLabel + "-DROID", Color.White)
+}
+
+private fun chassisFor(type: BlockType) = when (type) {
+    BlockType.COMPRESSOR -> R.drawable.droid_chassis_comp
+    BlockType.DRIVE -> R.drawable.droid_chassis_drive
+    BlockType.EQ -> R.drawable.droid_chassis_eq
+    BlockType.CHORUS -> R.drawable.droid_chassis_chorus
+    BlockType.AUTO_WAH -> R.drawable.droid_chassis_auto_wah
+    BlockType.TREMOLO -> R.drawable.droid_chassis_tremolo
+    BlockType.DETUNE -> R.drawable.droid_chassis_detune
+    else -> R.drawable.droid_chassis_gate
 }
 
 @Composable
@@ -118,11 +127,8 @@ internal fun StandardDroidEditor(
             val pedalHeight = pedalWidth * (9f / 16f)
             Box(Modifier.size(pedalWidth, pedalHeight)) {
                 Image(
-                    painterResource(R.drawable.gate_droid_base), null,
+                    painterResource(chassisFor(block.type)), null,
                     Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds,
-                    // Multiply keeps the alpha channel intact. BlendMode.Color
-                    // was painting the transparent canvas as a solid rectangle.
-                    colorFilter = ColorFilter.tint(style.body, BlendMode.Multiply),
                 )
                 FamilyModeButton(
                     "CONTROLES", { advanced = true },
@@ -419,8 +425,10 @@ internal fun CabDroidEditor(
             val width = minOf(maxWidth, maxHeight * (16f / 9f))
             val height = width * (9f / 16f)
             Box(Modifier.size(width, height)) {
-                Image(painterResource(R.drawable.gate_droid_base), null, Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds,
-                    colorFilter = ColorFilter.tint(Color(0xFF30383D), BlendMode.Multiply))
+                Image(
+                    painterResource(R.drawable.droid_chassis_cab), null,
+                    Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds,
+                )
                 Image(
                     painterResource(R.drawable.cab), null,
                     Modifier.offset(x = width * .08f, y = height * .34f).size(width * .56f, height * .47f),
