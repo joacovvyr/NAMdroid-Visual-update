@@ -120,7 +120,9 @@ internal fun StandardDroidEditor(
                 Image(
                     painterResource(R.drawable.gate_droid_base), null,
                     Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds,
-                    colorFilter = ColorFilter.tint(style.body, BlendMode.Color),
+                    // Multiply keeps the alpha channel intact. BlendMode.Color
+                    // was painting the transparent canvas as a solid rectangle.
+                    colorFilter = ColorFilter.tint(style.body, BlendMode.Multiply),
                 )
                 FamilyModeButton(
                     "CONTROLES", { advanced = true },
@@ -195,7 +197,12 @@ private fun DetuneFace(
     pedalHeight: androidx.compose.ui.unit.Dp,
 ) {
     val drop = block.type.parameters.first { it.key == "drop" }
-    val step = (block.parameters[drop.key] ?: drop.default).roundToInt().coerceIn(0, 8)
+    val step = (block.parameters[drop.key] ?: drop.default).roundToInt().coerceIn(-2, 8)
+    val semitones = when {
+        step < 0 -> -step
+        step >= 8 -> -12
+        else -> -step
+    }
     val knobs = block.type.parameters.filterNot { it.key == "drop" }
     val knobWidth = pedalWidth * .14f
     val knobHeight = pedalHeight * .34f
@@ -209,29 +216,81 @@ private fun DetuneFace(
         )
     }
     Column(
-        Modifier.offset(x = pedalWidth * .10f, y = pedalHeight * .49f)
-            .size(pedalWidth * .60f, pedalHeight * .18f)
+        Modifier.offset(x = pedalWidth * .07f, y = pedalHeight * .47f)
+            .size(pedalWidth * .63f, pedalHeight * .21f)
             .clip(RoundedCornerShape(8.dp)).background(Color.Black.copy(alpha = .28f))
             .border(1.dp, style.accent.copy(alpha = .38f), RoundedCornerShape(8.dp))
             .padding(horizontal = 10.dp, vertical = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("DROP  -$step SEMITONES", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+        val modeText = when {
+            semitones > 0 -> "UP  +$semitones SEMITONES"
+            semitones < 0 -> "DROP  $semitones SEMITONES"
+            else -> "STANDARD  0 SEMITONES"
+        }
+        Text(modeText, color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(4.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            repeat(9) { index ->
+            (-2..8).forEach { position ->
+                val positionSemitones = when {
+                    position < 0 -> -position
+                    position >= 8 -> -12
+                    else -> -position
+                }
+                val positionLabel = if (positionSemitones > 0) "+$positionSemitones" else positionSemitones.toString()
                 Column(
-                    Modifier.clickable { change(drop, index.toFloat()) },
+                    Modifier.clickable { change(drop, position.toFloat()) },
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    Canvas(Modifier.size(11.dp)) {
-                        drawCircle(if (index <= step) style.accent else Color.Black.copy(alpha = .58f))
-                        if (index == step) drawCircle(Color.White, radius = size.minDimension * .20f)
+                    Canvas(Modifier.size(10.dp)) {
+                        drawCircle(if (position == step) style.accent else Color.Black.copy(alpha = .58f))
+                        if (position == step) drawCircle(Color.White, radius = size.minDimension * .20f)
                     }
-                    Text("-$index", color = if (index == step) Color.White else Color.White.copy(alpha = .58f), fontSize = 6.sp)
+                    Text(positionLabel, color = if (position == step) Color.White else Color.White.copy(alpha = .58f), fontSize = 5.sp)
                 }
             }
         }
+    }
+    DetuneSelectorKnob(
+        selector = step,
+        tint = style.accent,
+        change = { change(drop, it.toFloat()) },
+        modifier = Modifier.offset(x = pedalWidth * .735f, y = pedalHeight * .39f)
+            .size(pedalWidth * .13f, pedalHeight * .22f),
+    )
+}
+
+@Composable
+private fun DetuneSelectorKnob(
+    selector: Int,
+    tint: Color,
+    change: (Int) -> Unit,
+    modifier: Modifier,
+) {
+    val currentSelector by rememberUpdatedState(selector)
+    val fraction = ((selector + 2f) / 10f).coerceIn(0f, 1f)
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        FamilyKnob(
+            fraction,
+            tint,
+            Modifier.fillMaxWidth(.72f).weight(1f).pointerInput(Unit) {
+                var dragStart = currentSelector.toFloat()
+                var dragDistance = 0f
+                detectVerticalDragGestures(
+                    onDragStart = {
+                        dragStart = currentSelector.toFloat()
+                        dragDistance = 0f
+                    },
+                ) { event, amount ->
+                    event.consume()
+                    dragDistance += amount
+                    val next = (dragStart - dragDistance / 24.dp.toPx())
+                        .roundToInt().coerceIn(-2, 8)
+                    change(next)
+                }
+            },
+        )
+        Text("TUNING", color = Color.White, fontSize = 7.sp, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -326,7 +385,12 @@ private fun FamilyAdvancedEditor(
                             )
                             Column(Modifier.weight(1f).padding(start = 8.dp)) {
                                 Text(formatValue(value, spec.unit), color = style.accent, fontWeight = FontWeight.Bold)
-                                Slider(value, { change(spec, it) }, valueRange = spec.range)
+                                Slider(
+                                    value,
+                                    { change(spec, if (block.type == BlockType.DETUNE && spec.key == "drop") it.roundToInt().toFloat() else it) },
+                                    valueRange = spec.range,
+                                    steps = if (block.type == BlockType.DETUNE && spec.key == "drop") 9 else 0,
+                                )
                             }
                         }
                     }
@@ -356,7 +420,7 @@ internal fun CabDroidEditor(
             val height = width * (9f / 16f)
             Box(Modifier.size(width, height)) {
                 Image(painterResource(R.drawable.gate_droid_base), null, Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds,
-                    colorFilter = ColorFilter.tint(Color(0xFF30383D), BlendMode.Color))
+                    colorFilter = ColorFilter.tint(Color(0xFF30383D), BlendMode.Multiply))
                 Image(
                     painterResource(R.drawable.cab), null,
                     Modifier.offset(x = width * .08f, y = height * .34f).size(width * .56f, height * .47f),
