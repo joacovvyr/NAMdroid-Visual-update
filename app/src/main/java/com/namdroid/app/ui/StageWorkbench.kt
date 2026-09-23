@@ -116,6 +116,56 @@ fun StageWorkbench(
         return
     }
 
+    val standardDroidTypes = setOf(
+        BlockType.COMPRESSOR,
+        BlockType.DRIVE,
+        BlockType.EQ,
+        BlockType.CHORUS,
+        BlockType.AUTO_WAH,
+        BlockType.TREMOLO,
+        BlockType.DETUNE,
+    )
+    if (editing && selected != null && selected.type in standardDroidTypes) {
+        BackHandler(foreground) { onCloseEditor() }
+        Box(Modifier.fillMaxSize().background(StageBlack).safeDrawingPadding()) {
+            StandardDroidEditor(
+                modifier = Modifier.fillMaxSize(),
+                block = selected,
+                change = onParameter,
+                toggle = { onToggleBlock(selected.id) },
+            )
+            IconButton(
+                onCloseEditor,
+                Modifier.align(Alignment.TopStart).zIndex(5f)
+                    .background(Color.Black.copy(alpha = .42f), CircleShape),
+            ) {
+                Icon(Icons.Default.ArrowBack, "Volver a la cadena", tint = Color.White)
+            }
+        }
+        return
+    }
+
+    if (editing && selected?.type == BlockType.IR) {
+        BackHandler(foreground) { onCloseEditor() }
+        Box(Modifier.fillMaxSize().background(StageBlack).safeDrawingPadding()) {
+            CabDroidEditor(
+                modifier = Modifier.fillMaxSize(),
+                block = selected,
+                change = onParameter,
+                toggle = { onToggleBlock(selected.id) },
+                pickIr = onPickIr,
+            )
+            IconButton(
+                onCloseEditor,
+                Modifier.align(Alignment.TopStart).zIndex(5f)
+                    .background(Color.Black.copy(alpha = .42f), CircleShape),
+            ) {
+                Icon(Icons.Default.ArrowBack, "Volver a la cadena", tint = Color.White)
+            }
+        }
+        return
+    }
+
     // AMP-DROID uses a fixed-ratio compositor so every interactive layer
     // stays registered to the approved amplifier artwork on every screen.
     if (editing && selected?.type == BlockType.AMP) {
@@ -785,14 +835,13 @@ private fun GateDroidEditor(
                     )
                 }
 
-                Image(
-                    painterResource(R.drawable.gate_droid_wordmark),
+                DroidWordmark(
                     "GATE-DROID",
                     Modifier
                         .align(Alignment.TopStart)
                         .offset(x = pedalWidth * .30f, y = pedalHeight * .735f)
                         .size(pedalWidth * .40f, pedalHeight * .105f),
-                    contentScale = ContentScale.Fit,
+                    25.sp,
                 )
             }
         }
@@ -1289,15 +1338,14 @@ private fun DelayDroidEditor(
                     }
                     Spacer(Modifier.weight(.18f))
                 }
-                Image(
-                    painterResource(R.drawable.delay_droid_wordmark),
+                DroidWordmark(
                     "DELAY-DROID",
                     Modifier
                         .align(Alignment.Center)
                         .offset(y = pedalHeight * .335f)
                         .width(pedalWidth * .36f)
                         .height(pedalHeight * .105f),
-                    contentScale = ContentScale.Fit,
+                    27.sp,
                 )
             }
         }
@@ -1552,15 +1600,14 @@ private fun ReverbDroidEditor(
                             .height(pedalHeight * .23f),
                     )
                 }
-                Image(
-                    painterResource(R.drawable.reverb_droid_wordmark),
+                DroidWordmark(
                     "REVERB-DROID",
                     Modifier
                         .align(Alignment.Center)
                         .offset(y = pedalHeight * .335f)
                         .width(pedalWidth * .43f)
                         .height(pedalHeight * .12f),
-                    contentScale = ContentScale.Fit,
+                    27.sp,
                 )
                 Column(
                     Modifier
