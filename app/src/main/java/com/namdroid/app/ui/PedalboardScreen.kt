@@ -74,6 +74,7 @@ fun PedalboardScreen(
     var showBlockEditor by remember { mutableStateOf(false) }
     var lastDeletedBlock by remember { mutableStateOf<Pair<Int, PedalBlock>?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
+    var persistRevision by remember { mutableIntStateOf(0) }
     LaunchedEffect(notice) { if (notice != null) { delay(6000); notice = null } }
     var lastTap by remember { mutableLongStateOf(0L) }
     var inputMeter by remember { mutableFloatStateOf(-90f) }
@@ -89,6 +90,7 @@ fun PedalboardScreen(
 
     fun currentRig() = RigPreset(rigs[activeRigIndex].id, rigName, bpm, blocks.toList(), rigs[activeRigIndex].scenes)
     fun persist() { rigs = rigs.toMutableList().also { it[activeRigIndex] = currentRig() }; store.saveAll(rigs); store.selectRig(rigs[activeRigIndex].id) }
+    fun schedulePersist() { persistRevision++ }
     fun syncEngine() {
         blocks.firstOrNull { it.type == BlockType.INPUT }?.parameters?.get("level")?.let(engine::setInputGainDb)
         blocks.firstOrNull { it.type == BlockType.OUTPUT }?.parameters?.get("level")?.let(engine::setOutputGainDb)
@@ -121,7 +123,17 @@ fun PedalboardScreen(
         restoreAssets(); persist()
     }
     fun updateBlock(id: String, transform: (PedalBlock) -> PedalBlock) {
-        val index = blocks.indexOfFirst { it.id == id }; if (index >= 0) { blocks[index] = transform(blocks[index]); persist() }
+        val index = blocks.indexOfFirst { it.id == id }
+        if (index >= 0) {
+            blocks[index] = transform(blocks[index])
+            schedulePersist()
+        }
+    }
+    LaunchedEffect(persistRevision) {
+        if (persistRevision > 0) {
+            delay(300)
+            persist()
+        }
     }
     fun applyScene(index: Int) {
         if (index !in 0..3) return
