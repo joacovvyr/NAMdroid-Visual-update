@@ -28,12 +28,14 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Android SDK, NDK y CMake
-        uses: android-actions/setup-android@v3
-
-      - name: Instalar NDK y CMake exactos
+      # ubuntu-latest already includes the Android command-line tools. Installing
+      # the legacy package named "tools" through setup-android now fails because
+      # Google removed it from the current SDK repository.
+      - name: Instalar SDK, NDK y CMake exactos
         run: |
-          sdkmanager --install "ndk;26.1.10909125" "cmake;3.22.1" "platforms;android-34" "build-tools;34.0.0"
+          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" --install "ndk;26.1.10909125" "cmake;3.22.1" "platforms;android-34" "build-tools;34.0.0"
           echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.1.10909125" >> "$GITHUB_ENV"
 
       - name: Descargar Eigen (dependencia header-only de NAM)
