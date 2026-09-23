@@ -594,31 +594,34 @@ private fun StageChain(
             return@Box
         }
         if (detunePedal) {
-            val selectedDrop = (block.parameters["drop"] ?: 2f).roundToInt().coerceIn(0, 8)
+            val selectedDrop = (block.parameters["drop"] ?: 2f).roundToInt().coerceIn(-2, 8)
             BoxWithConstraints(Modifier.fillMaxHeight(.88f).aspectRatio(2f / 3f)) {
                 Canvas(Modifier.fillMaxSize()) {
                     val positions = listOf(
-                        Offset(size.width * .27f, size.height * .43f),
-                        Offset(size.width * .21f, size.height * .34f),
-                        Offset(size.width * .22f, size.height * .24f),
-                        Offset(size.width * .32f, size.height * .15f),
-                        Offset(size.width * .50f, size.height * .11f),
-                        Offset(size.width * .68f, size.height * .15f),
-                        Offset(size.width * .78f, size.height * .24f),
-                        Offset(size.width * .79f, size.height * .34f),
+                        Offset(size.width * .22f, size.height * .43f),
+                        Offset(size.width * .17f, size.height * .35f),
+                        Offset(size.width * .17f, size.height * .26f),
+                        Offset(size.width * .23f, size.height * .18f),
+                        Offset(size.width * .34f, size.height * .12f),
+                        Offset(size.width * .47f, size.height * .10f),
+                        Offset(size.width * .60f, size.height * .12f),
+                        Offset(size.width * .71f, size.height * .18f),
+                        Offset(size.width * .78f, size.height * .26f),
+                        Offset(size.width * .78f, size.height * .35f),
                         Offset(size.width * .73f, size.height * .43f),
                     )
                     val radius = size.minDimension * if (large) .027f else .023f
                     positions.forEachIndexed { index, center ->
+                        val position = index - 2
                         drawCircle(Color.Black.copy(alpha = .78f), radius * 1.45f, center)
-                        drawCircle(if (index == selectedDrop && block.enabled) Color(0xFF42F5FF) else Color(0xFF263640), radius, center)
-                        if (index == selectedDrop && block.enabled) {
+                        drawCircle(if (position == selectedDrop && block.enabled) Color(0xFF42F5FF) else Color(0xFF263640), radius, center)
+                        if (position == selectedDrop && block.enabled) {
                             drawCircle(Color.White.copy(alpha = .8f), radius * .35f, center)
                         }
                     }
                 }
                 MasterKnob(
-                    fraction = selectedDrop / 8f,
+                    fraction = (selectedDrop + 2f) / 10f,
                     tint = Color(0xFF42F5FF),
                     modifier = Modifier.align(Alignment.TopCenter).offset(y = maxHeight * .20f)
                         .size(if (large) 58.dp else 29.dp),
