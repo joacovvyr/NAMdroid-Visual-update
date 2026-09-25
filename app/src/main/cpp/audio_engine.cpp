@@ -15,6 +15,27 @@
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
+namespace {
+void writeStudioWavHeader(std::ofstream &file, uint32_t sampleRate, uint32_t dataBytes) {
+    const uint32_t riffSize = 36 + dataBytes;
+    const uint16_t format = 1, channels = 1, bits = 16;
+    const uint32_t byteRate = sampleRate * channels * bits / 8;
+    const uint16_t blockAlign = channels * bits / 8;
+    file.seekp(0, std::ios::beg);
+    file.write("RIFF", 4); file.write(reinterpret_cast<const char *>(&riffSize), 4);
+    file.write("WAVEfmt ", 8);
+    const uint32_t fmtSize = 16;
+    file.write(reinterpret_cast<const char *>(&fmtSize), 4);
+    file.write(reinterpret_cast<const char *>(&format), 2);
+    file.write(reinterpret_cast<const char *>(&channels), 2);
+    file.write(reinterpret_cast<const char *>(&sampleRate), 4);
+    file.write(reinterpret_cast<const char *>(&byteRate), 4);
+    file.write(reinterpret_cast<const char *>(&blockAlign), 2);
+    file.write(reinterpret_cast<const char *>(&bits), 2);
+    file.write("data", 4); file.write(reinterpret_cast<const char *>(&dataBytes), 4);
+}
+}
+
 float AudioEngine::dbToLinear(float db) { return std::pow(10.0f, db / 20.0f); }
 
 AudioEngine::AudioEngine() {
@@ -40,6 +61,7 @@ AudioEngine::AudioEngine() {
 }
 
 AudioEngine::~AudioEngine() {
+    stopStudioRecording();
     mTunerWorkerRunning.store(false, std::memory_order_release);
     if (mTunerWorker.joinable()) mTunerWorker.join();
     stop();
@@ -164,6 +186,162 @@ float AudioEngine::getLooperProgress() const {
 void AudioEngine::looperCommand(int command) {
     if (command >= 0 && command <= 4) {
         mPendingLooperCommand.store(command, std::memory_order_release);
+    }
+}
+
+bool AudioEngine::startStudioRecording(const std::string &wavPath) {
+    stopStudioRecording();
+    mStudioRecordFile.open(wavPath, std::ios::binary | std::ios::trunc);
+    if (!mStudioRecordFile) return false;
+    mStudioRecordSampleRate = static_cast<uint32_t>(std::max(mSampleRate.load(), 1));
+    mStudioRecordDataBytes = 0;
+    writeStudioWavHeader(mStudioRecordFile, mStudioRecordSampleRate, 0);
+    mStudioRecordRead.store(0, std::memory_order_relaxed);
+    mStudioRecordWrite.store(0, std::memory_order_relaxed);
+    mStudioDroppedFrames.store(0, std::memory_order_relaxed);
+    mStudioRecording.store(true, std::memory_order_release);
+    mStudioWriter = std::thread(&AudioEngine::studioWriterLoop, this);
+    return true;
+}
+
+void AudioEngine::stopStudioRecording() {
+    mStudioRecording.store(false, std::memory_order_release);
+    if (mStudioWriter.joinable()) mStudioWriter.join();
+}
+
+void AudioEngine::studioWriterLoop() {
+    std::array<int16_t, 4096> pcm{};
+    int idlePassesAfterStop = 0;
+    while (mStudioRecording.load(std::memory_order_acquire) ||
+           mStudioRecordRead.load(std::memory_order_relaxed) <
+               mStudioRecordWrite.load(std::memory_order_acquire) ||
+           idlePassesAfterStop < 3) {
+        uint64_t read = mStudioRecordRead.load(std::memory_order_relaxed);
+        const uint64_t write = mStudioRecordWrite.load(std::memory_order_acquire);
+        const size_t count = static_cast<size_t>(std::min<uint64_t>(
+            write - read, static_cast<uint64_t>(pcm.size())));
+        if (count == 0) {
+            if (!mStudioRecording.load(std::memory_order_acquire)) ++idlePassesAfterStop;
+            std::this_thread::sleep_for(std::chrono::milliseconds(3));
+            continue;
+        }
+        idlePassesAfterStop = 0;
+        for (size_t i = 0; i < count; ++i) {
+            const float value = std::clamp(
+                mStudioRecordRing[(read + i) & kStudioRecordRingMask], -1.0f, 1.0f);
+            pcm[i] = static_cast<int16_t>(std::lrint(value * 32767.0f));
+        }
+        mStudioRecordFile.write(reinterpret_cast<const char *>(pcm.data()),
+                                static_cast<std::streamsize>(count * sizeof(int16_t)));
+        mStudioRecordDataBytes += static_cast<uint32_t>(count * sizeof(int16_t));
+        mStudioRecordRead.store(read + count, std::memory_order_release);
+    }
+    if (mStudioRecordFile) {
+        writeStudioWavHeader(mStudioRecordFile, mStudioRecordSampleRate,
+                             mStudioRecordDataBytes);
+        mStudioRecordFile.flush();
+        mStudioRecordFile.close();
+    }
+}
+
+bool AudioEngine::loadStudioTrack(int slot, const std::string &wavPath,
+                                  std::string &outError) {
+    if (slot < 0 || slot >= kMaxStudioTracks) {
+        outError = "Pista fuera de rango"; return false;
+    }
+    std::ifstream file(wavPath, std::ios::binary);
+    if (!file) { outError = "No se pudo abrir la pista"; return false; }
+    char riff[4], wave[4]; uint32_t riffSize = 0;
+    file.read(riff, 4); file.read(reinterpret_cast<char *>(&riffSize), 4); file.read(wave, 4);
+    if (std::strncmp(riff, "RIFF", 4) || std::strncmp(wave, "WAVE", 4)) {
+        outError = "La pista debe ser WAV"; return false;
+    }
+    uint16_t format = 0, channels = 0, bits = 0;
+    uint32_t sampleRate = 0, dataSize = 0;
+    std::streampos dataPos{}; bool hasData = false;
+    while (file && !hasData) {
+        char id[4]; uint32_t size = 0;
+        file.read(id, 4); file.read(reinterpret_cast<char *>(&size), 4);
+        if (!file) break;
+        if (!std::strncmp(id, "fmt ", 4)) {
+            file.read(reinterpret_cast<char *>(&format), 2);
+            file.read(reinterpret_cast<char *>(&channels), 2);
+            file.read(reinterpret_cast<char *>(&sampleRate), 4);
+            file.seekg(6, std::ios::cur);
+            file.read(reinterpret_cast<char *>(&bits), 2);
+            if (size > 16) file.seekg(size - 16, std::ios::cur);
+        } else if (!std::strncmp(id, "data", 4)) {
+            dataPos = file.tellg(); dataSize = size; hasData = true;
+            file.seekg(size, std::ios::cur);
+        } else file.seekg(size, std::ios::cur);
+        if (size & 1) file.seekg(1, std::ios::cur);
+    }
+    if (!hasData || channels == 0 || sampleRate == 0 ||
+        (format != 1 && format != 3)) {
+        outError = "Formato WAV no compatible"; return false;
+    }
+    const size_t bytesPerSample = bits / 8;
+    const size_t frameCount = dataSize /
+        std::max<size_t>(bytesPerSample * channels, 1);
+    const size_t maxFrames = static_cast<size_t>(sampleRate) * 60u * 10u;
+    if (frameCount == 0 || frameCount > maxFrames) {
+        outError = frameCount == 0 ? "La pista no contiene audio" :
+            "La primera version admite pistas de hasta 10 minutos";
+        return false;
+    }
+    auto track = std::make_shared<StudioTrack>();
+    track->sampleRate = sampleRate;
+    track->samples.resize(frameCount);
+    file.clear(); file.seekg(dataPos);
+    for (size_t frame = 0; frame < frameCount; ++frame) {
+        float sum = 0.0f;
+        for (uint16_t channel = 0; channel < channels; ++channel) {
+            if (format == 3 && bits == 32) {
+                float value = 0.0f; file.read(reinterpret_cast<char *>(&value), 4); sum += value;
+            } else if (format == 1 && bits == 16) {
+                int16_t value = 0; file.read(reinterpret_cast<char *>(&value), 2);
+                sum += value / 32768.0f;
+            } else if (format == 1 && bits == 24) {
+                unsigned char b[3]{}; file.read(reinterpret_cast<char *>(b), 3);
+                int32_t value = b[0] | (b[1] << 8) | (b[2] << 16);
+                if (value & 0x800000) value |= ~0xFFFFFF;
+                sum += value / 8388608.0f;
+            } else {
+                outError = "Profundidad WAV no compatible"; return false;
+            }
+        }
+        const float mono = std::clamp(sum / channels, -1.0f, 1.0f);
+        track->samples[frame] = static_cast<int16_t>(std::lrint(mono * 32767.0f));
+    }
+    std::atomic_store_explicit(&mStudioTracks[slot], track, std::memory_order_release);
+    return true;
+}
+
+void AudioEngine::clearStudioTrack(int slot) {
+    if (slot < 0 || slot >= kMaxStudioTracks) return;
+    std::atomic_store_explicit(&mStudioTracks[slot], std::shared_ptr<StudioTrack>{},
+                               std::memory_order_release);
+}
+
+void AudioEngine::setStudioTrackMix(int slot, float volume, bool muted) {
+    if (slot < 0 || slot >= kMaxStudioTracks) return;
+    const auto track = std::atomic_load_explicit(&mStudioTracks[slot],
+                                                 std::memory_order_acquire);
+    if (!track) return;
+    track->volume.store(std::clamp(volume, 0.0f, 2.0f), std::memory_order_relaxed);
+    track->muted.store(muted, std::memory_order_relaxed);
+}
+
+void AudioEngine::setStudioTransport(bool playing, float bpm, bool metronome) {
+    mStudioBpm.store(std::clamp(bpm, 30.0f, 300.0f), std::memory_order_relaxed);
+    mStudioMetronome.store(metronome, std::memory_order_relaxed);
+    if (playing && !mStudioPlaying.exchange(true, std::memory_order_acq_rel)) {
+        mStudioPositionFrames.store(0, std::memory_order_release);
+        mStudioClickPhase = 0.0;
+        mStudioClickEnvelope = 0.0f;
+    } else if (!playing) {
+        mStudioPlaying.store(false, std::memory_order_release);
+        mStudioPositionFrames.store(0, std::memory_order_release);
     }
 }
 
@@ -1376,6 +1554,71 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *stream,
         }
         mTransitionTail[mTransitionTailWrite] = mMonoResult[i];
         mTransitionTailWrite = (mTransitionTailWrite + 1) % kTransitionFrames;
+    }
+
+    // STUDIO toma la guitarra procesada antes de sumar pistas y metronomo:
+    // cada WAV queda limpio y puede reutilizarse sin imprimir el click ni las
+    // tomas anteriores. El callback solo publica en un ring SPSC; el disco se
+    // escribe desde studioWriterLoop().
+    if (mStudioRecording.load(std::memory_order_acquire)) {
+        uint64_t write = mStudioRecordWrite.load(std::memory_order_relaxed);
+        const uint64_t read = mStudioRecordRead.load(std::memory_order_acquire);
+        for (int32_t i = 0; i < frames; ++i) {
+            if (write - read >= kStudioRecordRingFrames - 1) {
+                mStudioDroppedFrames.fetch_add(frames - i, std::memory_order_relaxed);
+                break;
+            }
+            mStudioRecordRing[write & kStudioRecordRingMask] = mMonoResult[i];
+            ++write;
+        }
+        mStudioRecordWrite.store(write, std::memory_order_release);
+    }
+
+    if (mStudioPlaying.load(std::memory_order_acquire)) {
+        std::array<std::shared_ptr<StudioTrack>, kMaxStudioTracks> tracks{};
+        for (int slot = 0; slot < kMaxStudioTracks; ++slot) {
+            tracks[slot] = std::atomic_load_explicit(&mStudioTracks[slot],
+                                                     std::memory_order_acquire);
+        }
+        const uint64_t startFrame = mStudioPositionFrames.load(std::memory_order_relaxed);
+        const double outputRate = std::max(mSampleRate.load(), 1);
+        const bool clickEnabled = mStudioMetronome.load(std::memory_order_relaxed);
+        const double beatFrames = outputRate * 60.0 /
+            std::clamp(static_cast<double>(mStudioBpm.load(std::memory_order_relaxed)),
+                       30.0, 300.0);
+        for (int32_t i = 0; i < frames; ++i) {
+            const uint64_t timelineFrame = startFrame + static_cast<uint64_t>(i);
+            float backing = 0.0f;
+            for (const auto &track : tracks) {
+                if (!track || track->muted.load(std::memory_order_relaxed)) continue;
+                const double sourcePosition = timelineFrame *
+                    static_cast<double>(track->sampleRate) / outputRate;
+                const size_t left = static_cast<size_t>(sourcePosition);
+                if (left >= track->samples.size()) continue;
+                const size_t right = std::min(left + 1, track->samples.size() - 1);
+                const float fraction = static_cast<float>(sourcePosition - left);
+                const float first = track->samples[left] / 32768.0f;
+                const float second = track->samples[right] / 32768.0f;
+                backing += (first + (second - first) * fraction) *
+                    track->volume.load(std::memory_order_relaxed);
+            }
+            float click = 0.0f;
+            if (clickEnabled) {
+                const double beatPosition = std::fmod(static_cast<double>(timelineFrame), beatFrames);
+                if (beatPosition < 1.0) {
+                    mStudioClickEnvelope = 1.0f;
+                    mStudioClickPhase = 0.0;
+                }
+                click = static_cast<float>(std::sin(mStudioClickPhase) * mStudioClickEnvelope);
+                mStudioClickPhase += 6.283185307179586 * 1600.0 / outputRate;
+                if (mStudioClickPhase >= 6.283185307179586) mStudioClickPhase -= 6.283185307179586;
+                mStudioClickEnvelope *= 0.9945f;
+            }
+            mMonoResult[i] = std::clamp(mMonoResult[i] + backing * 0.8f + click * 0.28f,
+                                        -1.0f, 1.0f);
+        }
+        mStudioPositionFrames.store(startFrame + static_cast<uint64_t>(frames),
+                                    std::memory_order_release);
     }
 
     const int pendingLooper = mPendingLooperCommand.exchange(-1, std::memory_order_acq_rel);

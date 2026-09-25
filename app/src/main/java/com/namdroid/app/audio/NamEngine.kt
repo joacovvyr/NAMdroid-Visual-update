@@ -58,6 +58,17 @@ class NamEngine {
     fun getBufferSizeFrames(): Int = nativeGetBufferSizeFrames()
     fun getXRunCount(): Int = nativeGetXRunCount()
     fun getCallbackLoadPercent(): Double = nativeGetCallbackLoadPercent()
+    fun startStudioRecording(path: String): Boolean = nativeStartStudioRecording(path)
+    fun stopStudioRecording() = nativeStopStudioRecording()
+    fun loadStudioTrack(slot: Int, path: String): String = nativeLoadStudioTrack(slot, path)
+    fun clearStudioTrack(slot: Int) = nativeClearStudioTrack(slot)
+    fun setStudioTrackMix(slot: Int, volume: Float, muted: Boolean) =
+        nativeSetStudioTrackMix(slot, volume, muted)
+    fun setStudioTransport(playing: Boolean, bpm: Float, metronome: Boolean) =
+        nativeSetStudioTransport(playing, bpm, metronome)
+    fun isStudioRecording(): Boolean = nativeIsStudioRecording()
+    fun getStudioPositionFrames(): Long = nativeGetStudioPositionFrames()
+    fun getStudioDroppedFrames(): Int = nativeGetStudioDroppedFrames()
 
     private external fun nativeStart(): Boolean
     private external fun nativeStop()
@@ -90,4 +101,13 @@ class NamEngine {
     private external fun nativeGetBufferSizeFrames(): Int
     private external fun nativeGetXRunCount(): Int
     private external fun nativeGetCallbackLoadPercent(): Double
+    private external fun nativeStartStudioRecording(path: String): Boolean
+    private external fun nativeStopStudioRecording()
+    private external fun nativeLoadStudioTrack(slot: Int, path: String): String
+    private external fun nativeClearStudioTrack(slot: Int)
+    private external fun nativeSetStudioTrackMix(slot: Int, volume: Float, muted: Boolean)
+    private external fun nativeSetStudioTransport(playing: Boolean, bpm: Float, metronome: Boolean)
+    private external fun nativeIsStudioRecording(): Boolean
+    private external fun nativeGetStudioPositionFrames(): Long
+    private external fun nativeGetStudioDroppedFrames(): Int
 }

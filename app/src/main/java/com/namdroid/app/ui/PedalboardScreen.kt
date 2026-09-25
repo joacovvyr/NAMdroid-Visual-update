@@ -52,6 +52,7 @@ fun PedalboardScreen(
     onToggleAudio: () -> Unit,
     onPickModel: () -> Unit,
     onBrowseTone3000: () -> Unit,
+    onOpenStudio: () -> Unit,
     onLoadModelPath: (String) -> String,
     onAudioRouteChanged: (Int, Int, Int, Int) -> Unit,
 ) {
@@ -278,7 +279,8 @@ fun PedalboardScreen(
             notice = "Escena ${('A'.code + activeScene).toChar()} guardada"
         },
         onTap = ::tapTempo, onRigs = { showLibrary = true },
-        onTone = { showBlockEditor = false; onBrowseTone3000() }, onAudio = onToggleAudio,
+        onTone = { showBlockEditor = false; onBrowseTone3000() },
+        onStudio = { showBlockEditor = false; onOpenStudio() }, onAudio = onToggleAudio,
         onSettings = { showSettings = true }, onAdd = { showAddBlock = true },
         onTuner = { showTuner = true }, onLooper = { showLooper = true },
         onPickNam = onPickModel, onPickIr = { selected?.let { pendingIrBlock = it.id; pickIr.launch("audio/wav") } },

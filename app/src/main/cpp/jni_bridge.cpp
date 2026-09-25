@@ -179,4 +179,61 @@ JNIEXPORT jint JNICALL Java_com_namdroid_app_audio_NamEngine_nativeGetBufferSize
 JNIEXPORT jint JNICALL Java_com_namdroid_app_audio_NamEngine_nativeGetXRunCount(JNIEnv *, jobject) { return gEngine ? gEngine->getXRunCount() : 0; }
 JNIEXPORT jdouble JNICALL Java_com_namdroid_app_audio_NamEngine_nativeGetCallbackLoadPercent(JNIEnv *, jobject) { return gEngine ? gEngine->getLastCallbackLoadPercent() : 0.0; }
 
+JNIEXPORT jboolean JNICALL
+Java_com_namdroid_app_audio_NamEngine_nativeStartStudioRecording(JNIEnv *env, jobject, jstring path) {
+    if (!gEngine || !path) return JNI_FALSE;
+    const char *chars = env->GetStringUTFChars(path, nullptr);
+    const bool started = gEngine->startStudioRecording(chars);
+    env->ReleaseStringUTFChars(path, chars);
+    return started ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL
+Java_com_namdroid_app_audio_NamEngine_nativeStopStudioRecording(JNIEnv *, jobject) {
+    if (gEngine) gEngine->stopStudioRecording();
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_namdroid_app_audio_NamEngine_nativeLoadStudioTrack(
+        JNIEnv *env, jobject, jint slot, jstring path) {
+    if (!gEngine || !path) return env->NewStringUTF("Motor de audio no disponible");
+    const char *chars = env->GetStringUTFChars(path, nullptr);
+    std::string error;
+    const bool loaded = gEngine->loadStudioTrack(slot, chars, error);
+    env->ReleaseStringUTFChars(path, chars);
+    return env->NewStringUTF(loaded ? "" : error.c_str());
+}
+
+JNIEXPORT void JNICALL
+Java_com_namdroid_app_audio_NamEngine_nativeClearStudioTrack(JNIEnv *, jobject, jint slot) {
+    if (gEngine) gEngine->clearStudioTrack(slot);
+}
+
+JNIEXPORT void JNICALL
+Java_com_namdroid_app_audio_NamEngine_nativeSetStudioTrackMix(
+        JNIEnv *, jobject, jint slot, jfloat volume, jboolean muted) {
+    if (gEngine) gEngine->setStudioTrackMix(slot, volume, muted);
+}
+
+JNIEXPORT void JNICALL
+Java_com_namdroid_app_audio_NamEngine_nativeSetStudioTransport(
+        JNIEnv *, jobject, jboolean playing, jfloat bpm, jboolean metronome) {
+    if (gEngine) gEngine->setStudioTransport(playing, bpm, metronome);
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_namdroid_app_audio_NamEngine_nativeIsStudioRecording(JNIEnv *, jobject) {
+    return gEngine && gEngine->isStudioRecording() ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_namdroid_app_audio_NamEngine_nativeGetStudioPositionFrames(JNIEnv *, jobject) {
+    return gEngine ? static_cast<jlong>(gEngine->getStudioPositionFrames()) : 0;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_namdroid_app_audio_NamEngine_nativeGetStudioDroppedFrames(JNIEnv *, jobject) {
+    return gEngine ? static_cast<jint>(gEngine->getStudioDroppedFrames()) : 0;
+}
+
 } // extern "C"
