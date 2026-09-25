@@ -160,6 +160,11 @@ private:
         size_t pitchWriteIndex{0};
         float pitchPhase{0.0f};
         float pitchToneState{0.0f};
+        float pitchRatioSmoothed{1.0f};
+        float pitchWindowSmoothed{2048.0f};
+        float pitchMixSmoothed{0.0f};
+        float pitchLevelSmoothed{1.0f};
+        float pitchWetGain{0.0f};
     };
     std::array<EffectSlot, kMaxEffectSlots> mEffectSlots;
     std::atomic<int> mEffectSlotCount{0};
@@ -257,6 +262,11 @@ private:
     size_t mPitchWriteIndex{0};
     float mPitchPhase{0.0f};
     float mPitchToneState{0.0f};
+    float mPitchRatioSmoothed{1.0f};
+    float mPitchWindowSmoothed{2048.0f};
+    float mPitchMixSmoothed{0.0f};
+    float mPitchLevelSmoothed{1.0f};
+    float mPitchWetGain{0.0f};
     float mDrivePreviousInput{0.0f};
     float mDriveAntiAliasState{0.0f};
     float mDriveLowCutState{0.0f};

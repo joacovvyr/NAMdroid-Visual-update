@@ -457,6 +457,10 @@ bool AudioEngine::start() {
         slot.wahState = {}; slot.autoWahEnvelope = 0.0f; slot.tremoloPhase = 0.0f;
         slot.pitchBuffer.assign(std::max(mSampleRate.load() / 5, 1), 0.0f);
         slot.pitchWriteIndex = 0; slot.pitchPhase = 0.0f; slot.pitchToneState = 0.0f;
+        slot.pitchRatioSmoothed = 1.0f;
+        slot.pitchWindowSmoothed = std::max(mSampleRate.load() * 0.04f, 128.0f);
+        slot.pitchMixSmoothed = 0.0f; slot.pitchLevelSmoothed = 1.0f;
+        slot.pitchWetGain = 0.0f;
     }
     mChorusBuffer.assign(std::max(mSampleRate.load() / 10, 1), 0.0f);
     mPitchBuffer.assign(std::max(mSampleRate.load() / 5, 1), 0.0f);
@@ -471,6 +475,10 @@ bool AudioEngine::start() {
     mChorusToneState = 0.0f;
     mWahState = {}; mAutoWahEnvelope = 0.0f; mTremoloPhase = 0.0f;
     mPitchWriteIndex = 0; mPitchPhase = 0.0f; mPitchToneState = 0.0f;
+    mPitchRatioSmoothed = 1.0f;
+    mPitchWindowSmoothed = std::max(mSampleRate.load() * 0.04f, 128.0f);
+    mPitchMixSmoothed = 0.0f; mPitchLevelSmoothed = 1.0f;
+    mPitchWetGain = 0.0f;
     mDrivePreviousInput = 0.0f;
     mDriveAntiAliasState = 0.0f;
     mDriveLowCutState = 0.0f;
@@ -765,6 +773,11 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *stream,
         size_t &pitchWriteIndex = instance ? instance->pitchWriteIndex : mPitchWriteIndex;
         float &pitchPhase = instance ? instance->pitchPhase : mPitchPhase;
         float &pitchToneState = instance ? instance->pitchToneState : mPitchToneState;
+        float &pitchRatioSmoothed = instance ? instance->pitchRatioSmoothed : mPitchRatioSmoothed;
+        float &pitchWindowSmoothed = instance ? instance->pitchWindowSmoothed : mPitchWindowSmoothed;
+        float &pitchMixSmoothed = instance ? instance->pitchMixSmoothed : mPitchMixSmoothed;
+        float &pitchLevelSmoothed = instance ? instance->pitchLevelSmoothed : mPitchLevelSmoothed;
+        float &pitchWetGain = instance ? instance->pitchWetGain : mPitchWetGain;
 
         if (effect == 1) {
             const float threshold = dbToLinear(parameter(0));
@@ -1214,42 +1227,80 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *stream,
                 (selectedDrop >= 8.0f ? -12.0f : -selectedDrop);
             const float semitones = effect == 14 ? detuneSemitones :
                 std::clamp(parameter(0) + parameter(1) / 100.0f, -12.0f, 12.0f);
-            if (std::abs(semitones) < 0.001f) continue;
-            const float ratio = std::pow(2.0f, semitones / 12.0f);
+            const bool shiftActive = std::abs(semitones) >= 0.001f;
+            if (!shiftActive && pitchWetGain < 1e-4f) continue;
+            const float ratio = shiftActive ? std::pow(2.0f, semitones / 12.0f) : 1.0f;
             const int mixParam = effect == 14 ? 1 : 2;
             const int windowParam = effect == 14 ? 2 : 3;
             const int toneParam = effect == 14 ? 3 : 4;
             const int levelParam = effect == 14 ? 4 : 5;
             const float mix = std::clamp(parameter(mixParam) / 100.0f, 0.0f, 1.0f);
-            const float window = std::clamp(parameter(windowParam) * 0.001f * mSampleRate.load(),
-                128.0f, static_cast<float>(pitchBuffer.size() - 2));
+            // Cuatro granos permiten acortar la ventana en cambios pequenos sin
+            // el temblor de amplitud del antiguo solapado de dos granos. Para
+            // una octava se conserva la ventana completa porque necesita mas
+            // contexto; +/-1 y +/-2 usan cerca del 62-68 % y responden antes.
+            const float shiftAmount = std::clamp(std::abs(semitones) / 12.0f, 0.0f, 1.0f);
+            const float adaptiveWindowScale = 0.62f + 0.38f * shiftAmount;
+            const float window = std::clamp(
+                parameter(windowParam) * adaptiveWindowScale * 0.001f * mSampleRate.load(),
+                128.0f, static_cast<float>(pitchBuffer.size() - 4));
             const float tone = std::clamp(parameter(toneParam) / 100.0f, 0.0f, 1.0f);
             const float level = dbToLinear(parameter(levelParam));
-            const float phaseIncrement = (1.0f - ratio) / window;
             const float toneHz = 1200.0f + tone * 12500.0f;
             const float toneCoeff = 1.0f - std::exp(-6.2831853f * toneHz / mSampleRate.load());
-            const auto grain = [&](float phase) {
-                phase -= std::floor(phase);
-                const float delay = 1.0f + phase * window;
-                const size_t whole = static_cast<size_t>(delay);
-                const float fraction = delay - static_cast<float>(whole);
-                const size_t a = (pitchWriteIndex + pitchBuffer.size() - whole) % pitchBuffer.size();
-                const size_t b = (a + pitchBuffer.size() - 1) % pitchBuffer.size();
-                const float sample = pitchBuffer[a] * (1.0f - fraction) + pitchBuffer[b] * fraction;
-                const float envelope = 0.5f - 0.5f * std::cos(6.2831853f * phase);
-                return std::array<float, 2>{sample, envelope};
-            };
+            const float ratioSmoothing = 1.0f - std::exp(-1.0f / (0.012f * mSampleRate.load()));
+            const float windowSmoothing = 1.0f - std::exp(-1.0f / (0.025f * mSampleRate.load()));
+            const float controlSmoothing = 1.0f - std::exp(-1.0f / (0.008f * mSampleRate.load()));
+            const float wetTarget = shiftActive ? 1.0f : 0.0f;
             for (int32_t i = 0; i < frames; ++i) {
                 const float dry = mMonoResult[i];
                 pitchBuffer[pitchWriteIndex] = dry;
-                const auto first = grain(pitchPhase);
-                const auto second = grain(pitchPhase + 0.5f);
-                const float weight = std::max(first[1] + second[1], 1e-4f);
-                const float shifted = (first[0] * first[1] + second[0] * second[1]) / weight;
+
+                pitchRatioSmoothed += (ratio - pitchRatioSmoothed) * ratioSmoothing;
+                pitchWindowSmoothed += (window - pitchWindowSmoothed) * windowSmoothing;
+                pitchMixSmoothed += (mix - pitchMixSmoothed) * controlSmoothing;
+                pitchLevelSmoothed += (level - pitchLevelSmoothed) * controlSmoothing;
+                pitchWetGain += (wetTarget - pitchWetGain) * controlSmoothing;
+
+                const auto cubicRead = [&](float delay) {
+                    const float boundedDelay = std::clamp(delay, 2.0f,
+                        static_cast<float>(pitchBuffer.size() - 3));
+                    const size_t whole = static_cast<size_t>(boundedDelay);
+                    const float t = boundedDelay - static_cast<float>(whole);
+                    const size_t y1Index = (pitchWriteIndex + pitchBuffer.size() - whole) %
+                        pitchBuffer.size();
+                    const size_t y0Index = (y1Index + 1) % pitchBuffer.size();
+                    const size_t y2Index = (y1Index + pitchBuffer.size() - 1) % pitchBuffer.size();
+                    const size_t y3Index = (y2Index + pitchBuffer.size() - 1) % pitchBuffer.size();
+                    const float y0 = pitchBuffer[y0Index], y1 = pitchBuffer[y1Index];
+                    const float y2 = pitchBuffer[y2Index], y3 = pitchBuffer[y3Index];
+                    return y1 + 0.5f * t * (y2 - y0 + t *
+                        (2.0f * y0 - 5.0f * y1 + 4.0f * y2 - y3 + t *
+                        (3.0f * (y1 - y2) + y3 - y0)));
+                };
+                const auto grain = [&](float phase) {
+                    phase -= std::floor(phase);
+                    const float sample = cubicRead(2.0f + phase * pitchWindowSmoothed);
+                    const float envelope = 0.5f - 0.5f * std::cos(6.2831853f * phase);
+                    return std::array<float, 2>{sample, envelope};
+                };
+
+                float shifted = 0.0f;
+                float weight = 0.0f;
+                for (int grainIndex = 0; grainIndex < 4; ++grainIndex) {
+                    const auto current = grain(pitchPhase + 0.25f * grainIndex);
+                    shifted += current[0] * current[1];
+                    weight += current[1];
+                }
+                shifted /= std::max(weight, 1e-4f);
                 pitchToneState += toneCoeff * (shifted - pitchToneState);
-                mMonoResult[i] = (dry * (1.0f - mix) + pitchToneState * mix) * level;
+                const float effectiveMix = pitchMixSmoothed * pitchWetGain;
+                mMonoResult[i] = (dry * (1.0f - effectiveMix) +
+                    pitchToneState * effectiveMix) *
+                    (1.0f + (pitchLevelSmoothed - 1.0f) * pitchWetGain);
                 pitchWriteIndex = (pitchWriteIndex + 1) % pitchBuffer.size();
-                pitchPhase += phaseIncrement;
+                pitchPhase += (1.0f - pitchRatioSmoothed) /
+                    std::max(pitchWindowSmoothed, 128.0f);
                 pitchPhase -= std::floor(pitchPhase);
             }
         }
