@@ -16,7 +16,7 @@ private fun StagePreview() {
             onSelect = {}, onCloseEditor = {}, onMove = { _, _ -> }, onToggleBlock = {},
             onParameter = { _, _ -> }, onDelete = {}, onDropDelete = {},
             onUndoDelete = {}, onScene = {}, onSaveScene = {},
-            onTap = {}, onRigs = {}, onTone = {}, onAudio = {}, onSettings = {},
+            onTap = {}, onRigs = {}, onTone = {}, onStudio = {}, onAudio = {}, onSettings = {},
             onAdd = {}, onTuner = {}, onLooper = {}, onPickNam = {}, onPickIr = {},
         )
     }
