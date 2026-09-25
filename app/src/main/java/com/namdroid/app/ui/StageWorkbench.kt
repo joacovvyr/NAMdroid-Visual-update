@@ -71,7 +71,8 @@ fun StageWorkbench(
     onParameter: (ParameterSpec, Float) -> Unit, onDelete: () -> Unit,
     onDropDelete: (String) -> Unit, onUndoDelete: () -> Unit,
     onScene: (Int) -> Unit, onSaveScene: () -> Unit, onTap: () -> Unit,
-    onRigs: () -> Unit, onTone: () -> Unit, onAudio: () -> Unit, onSettings: () -> Unit,
+    onRigs: () -> Unit, onTone: () -> Unit, onStudio: () -> Unit,
+    onAudio: () -> Unit, onSettings: () -> Unit,
     onAdd: () -> Unit, onTuner: () -> Unit, onLooper: () -> Unit,
     onPickNam: () -> Unit, onPickIr: () -> Unit, foreground: Boolean = true,
 ) {
@@ -249,6 +250,7 @@ fun StageWorkbench(
                 IconButton({ overflow = true }) { Icon(Icons.Default.MoreVert, "Más opciones") }
                 DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }, modifier = Modifier.widthIn(min = 260.dp, max = 340.dp)) {
                     DropdownMenuItem(text = { MenuLabel("TONE3000", "Catálogo, descargas y cuenta") }, leadingIcon = { Icon(Icons.Default.Cloud, null) }, onClick = { overflow = false; onTone() })
+                    DropdownMenuItem(text = { MenuLabel("STUDIO", "Grabación multipista y metrónomo") }, leadingIcon = { Icon(Icons.Default.MultitrackAudio, null) }, onClick = { overflow = false; onStudio() })
                     DropdownMenuItem(text = { MenuLabel("Entrada y salida", "USB · Auto / Exclusive / Shared") }, leadingIcon = { Icon(Icons.Default.SettingsInputComponent, null) }, onClick = { overflow = false; onSettings() })
                     DropdownMenuItem(text = { MenuLabel("Rigs y setlist", "Guardar, ordenar y respaldar") }, leadingIcon = { Icon(Icons.Default.QueueMusic, null) }, onClick = { overflow = false; onRigs() })
                     DropdownMenuItem(text = { MenuLabel("Agregar efecto", "Pedales, amp, cab y utilidades") }, leadingIcon = { Icon(Icons.Default.AddCircleOutline, null) }, onClick = { overflow = false; onAdd() })

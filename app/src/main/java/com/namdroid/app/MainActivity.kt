@@ -64,7 +64,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Screen { PEDALBOARD, TONE3000 }
+private enum class Screen { PEDALBOARD, TONE3000, STUDIO }
 
 @Composable
 private fun AppNav(engine: NamEngine, oauthCallback: Uri?, onOAuthConsumed: () -> Unit) {
@@ -164,6 +164,7 @@ private fun AppNav(engine: NamEngine, oauthCallback: Uri?, onOAuthConsumed: () -
             },
             onPickModel = { pickNamFile.launch("*/*") },
             onBrowseTone3000 = { screen = Screen.TONE3000 },
+            onOpenStudio = { screen = Screen.STUDIO },
             onLoadModelPath = { loadModel(File(it)) },
             onAudioRouteChanged = { inputId, outputId, sharingMode, inputChannelMode ->
                 // Guardar primero y reiniciar de forma controlada. Android puede tardar
@@ -232,6 +233,24 @@ private fun AppNav(engine: NamEngine, oauthCallback: Uri?, onOAuthConsumed: () -
                 }
             },
         )
+        }
+        if (screen == Screen.STUDIO) Surface(
+            Modifier.fillMaxSize().zIndex(2f)
+        ) {
+            StudioScreen(
+                engine = engine,
+                running = running,
+                ensureAudio = {
+                    if (running) true else {
+                        running = engine.start()
+                        statusText = if (running)
+                            "Audio engine running at ${engine.getStreamSampleRate()} Hz"
+                        else "Could not start audio"
+                        running
+                    }
+                },
+                onBack = { screen = Screen.PEDALBOARD },
+            )
         }
     }
 }

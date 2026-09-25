@@ -5,6 +5,7 @@
 #include <chrono>
 #include <complex>
 #include <cstdint>
+#include <fstream>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -53,6 +54,15 @@ public:
     // 0 = mezcla/mono automatico, 1 = canal 1, 2 = canal 2.
     void setInputChannelMode(int32_t mode) { mInputChannelMode.store(mode < 0 ? 0 : (mode > 2 ? 2 : mode)); }
     void looperCommand(int command);
+    bool startStudioRecording(const std::string &wavPath);
+    void stopStudioRecording();
+    bool loadStudioTrack(int slot, const std::string &wavPath, std::string &outError);
+    void clearStudioTrack(int slot);
+    void setStudioTrackMix(int slot, float volume, bool muted);
+    void setStudioTransport(bool playing, float bpm, bool metronome);
+    bool isStudioRecording() const { return mStudioRecording.load(); }
+    uint64_t getStudioPositionFrames() const { return mStudioPositionFrames.load(); }
+    uint32_t getStudioDroppedFrames() const { return mStudioDroppedFrames.load(); }
     float getInputLevelDb() const { return mInputLevelDb.load(); }
     float getOutputLevelDb() const { return mOutputLevelDb.load(); }
     float getDetectedFrequency() const { return mDetectedFrequency.load(); }
@@ -91,12 +101,16 @@ private:
     // indexar sin division en los dos hilos de audio.
     static constexpr size_t kInputRingFrames = 16384;
     static constexpr size_t kInputRingMask = kInputRingFrames - 1;
+    static constexpr int32_t kMaxStudioTracks = 8;
+    static constexpr size_t kStudioRecordRingFrames = 1u << 20;
+    static constexpr size_t kStudioRecordRingMask = kStudioRecordRingFrames - 1;
 
     void tunerWorkerLoop();
     void analyseTunerBuffer(const std::array<float, kTunerBufferFrames> &samples);
     void requestCrossfade() { mCrossfadeRequested.store(true, std::memory_order_release); }
     static void fft(std::vector<std::complex<float>> &data, bool inverse);
     void processIrPartition();
+    void studioWriterLoop();
 
     std::shared_ptr<oboe::AudioStream> mOutStream;
     std::shared_ptr<oboe::AudioStream> mInStream;
@@ -232,6 +246,28 @@ private:
     std::array<std::vector<float>, 2> mReverbAllpasses;
     std::vector<float> mChorusBuffer;
     std::vector<float> mLooperBuffer;
+    struct StudioTrack {
+        std::vector<int16_t> samples;
+        uint32_t sampleRate{48000};
+        std::atomic<float> volume{1.0f};
+        std::atomic<bool> muted{false};
+    };
+    std::array<std::shared_ptr<StudioTrack>, kMaxStudioTracks> mStudioTracks{};
+    std::atomic<bool> mStudioPlaying{false};
+    std::atomic<bool> mStudioMetronome{false};
+    std::atomic<float> mStudioBpm{120.0f};
+    std::atomic<uint64_t> mStudioPositionFrames{0};
+    double mStudioClickPhase{0.0};
+    float mStudioClickEnvelope{0.0f};
+    std::array<float, kStudioRecordRingFrames> mStudioRecordRing{};
+    std::atomic<uint64_t> mStudioRecordWrite{0};
+    std::atomic<uint64_t> mStudioRecordRead{0};
+    std::atomic<bool> mStudioRecording{false};
+    std::atomic<uint32_t> mStudioDroppedFrames{0};
+    std::thread mStudioWriter;
+    std::ofstream mStudioRecordFile;
+    uint32_t mStudioRecordSampleRate{48000};
+    uint32_t mStudioRecordDataBytes{0};
     // Doble buffer SPSC para que la autocorrelacion nunca corra en el callback.
     // Estados: 0 libre, 1 escribiendo, 2 listo, 3 analizando.
     std::array<std::array<float, kTunerBufferFrames>, 2> mTunerBuffers{};
