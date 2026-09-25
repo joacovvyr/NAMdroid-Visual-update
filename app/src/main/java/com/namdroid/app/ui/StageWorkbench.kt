@@ -613,43 +613,12 @@ private fun ChainRowsButton(label: String, selected: Boolean, click: () -> Unit)
     }
     Box(modifier.padding(vertical = 3.dp), contentAlignment = Alignment.Center) {
         if (chassisResource != null) {
-            Box(
-                Modifier.fillMaxWidth(.97f).aspectRatio(16f / 9f),
-                contentAlignment = Alignment.Center,
-            ) {
-                Image(
-                    painterResource(chassisResource),
-                    null,
-                    Modifier.fillMaxSize(),
-                    contentScale = ContentScale.FillBounds,
-                )
-                Row(
-                    Modifier.align(Alignment.TopCenter).offset(y = if (large) 18.dp else 8.dp)
-                        .fillMaxWidth(.48f),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                ) {
-                    block.type.parameters.take(3).forEach { spec ->
-                        val value = block.parameters[spec.key] ?: spec.default
-                        val fraction = ((value - spec.range.start) /
-                            (spec.range.endInclusive - spec.range.start)).coerceIn(0f, 1f)
-                        MasterKnob(
-                            fraction,
-                            block.type.color,
-                            Modifier.size(if (large) 26.dp else 13.dp),
-                            if (large) 2f else 1f,
-                        )
-                    }
-                }
-                Text(
-                    droidChainTitle(block.type),
-                    Modifier.align(Alignment.BottomCenter).padding(bottom = if (large) 14.dp else 5.dp),
-                    color = Color.White,
-                    fontSize = if (large) 14.sp else 7.sp,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = if (large) 1.sp else .4.sp,
-                    maxLines = 1,
-                )
-            }
+            DroidChassisMiniature(
+                block = block,
+                chassisResource = chassisResource,
+                large = large,
+                modifier = Modifier.fillMaxWidth(.97f).aspectRatio(16f / 9f),
+            )
             return@Box
         }
         if (block.type !in setOf(BlockType.INPUT, BlockType.OUTPUT)) {
@@ -752,6 +721,228 @@ private fun ChainRowsButton(label: String, selected: Boolean, click: () -> Unit)
                 Spacer(Modifier.weight(1f))
             }
         }
+    }
+}
+
+@Composable
+private fun DroidChassisMiniature(
+    block: PedalBlock,
+    chassisResource: Int,
+    large: Boolean,
+    modifier: Modifier,
+) {
+    BoxWithConstraints(modifier, contentAlignment = Alignment.Center) {
+        val width = maxWidth
+        val height = maxHeight
+        val accent = block.type.color
+        val specs = block.type.parameters.associateBy { it.key }
+
+        Image(
+            painterResource(chassisResource),
+            null,
+            Modifier.fillMaxSize(),
+            contentScale = ContentScale.FillBounds,
+        )
+
+        when (block.type) {
+            BlockType.DELAY -> {
+                DroidMiniKnobRow(
+                    block,
+                    listOf("time", "feedback", "mix", "cutoff", "modulation").mapNotNull(specs::get),
+                    width, height, .13f, .10f, .76f, accent, large,
+                )
+                DroidMiniKnobRow(
+                    block,
+                    listOf("character", "resonance", "level").mapNotNull(specs::get),
+                    width, height, .46f, .10f, .48f, accent, large,
+                )
+                listOf("quarter", "sixteenth", "triplet").forEachIndexed { index, key ->
+                    val spec = specs[key] ?: return@forEachIndexed
+                    val active = (block.parameters[key] ?: spec.default) >= 50f
+                    Box(
+                        Modifier.align(Alignment.TopStart).offset(
+                            x = width * (.54f + index * .09f),
+                            y = height * .51f,
+                        ).size(width * .065f, height * .055f)
+                            .background(
+                                if (active) accent.copy(alpha = .86f) else Color(0xDD14191D),
+                                RoundedCornerShape(2.dp),
+                            )
+                            .border(1.dp, accent.copy(alpha = .72f), RoundedCornerShape(2.dp)),
+                    )
+                }
+            }
+            BlockType.REVERB -> {
+                DroidMiniKnobRow(
+                    block,
+                    listOf("decay", "tone", "mix").mapNotNull(specs::get),
+                    width, height, .18f, .21f, .69f, Color(0xFFFF64C8), large,
+                )
+                Row(
+                    Modifier.align(Alignment.TopStart)
+                        .offset(x = width * .11f, y = height * .54f)
+                        .size(width * .52f, height * .07f),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    repeat(5) { index ->
+                        val selected = (block.parameters["mode"] ?: 2f).roundToInt() == index
+                        Box(
+                            Modifier.weight(1f).fillMaxHeight().padding(horizontal = 1.dp)
+                                .background(
+                                    if (selected) Color(0xFFFF64C8).copy(alpha = .55f)
+                                    else Color.Black.copy(alpha = .28f),
+                                    RoundedCornerShape(2.dp),
+                                )
+                                .border(
+                                    1.dp,
+                                    Color(0xFFFF64C8).copy(alpha = if (selected) .9f else .28f),
+                                    RoundedCornerShape(2.dp),
+                                ),
+                        )
+                    }
+                }
+            }
+            BlockType.DETUNE -> {
+                DroidMiniKnobRow(
+                    block,
+                    listOf("mix", "window", "tone", "level").mapNotNull(specs::get),
+                    width, height, .14f, .09f, .69f, accent, large,
+                )
+                val selected = (block.parameters["drop"] ?: 2f).roundToInt().coerceIn(-2, 8)
+                Canvas(
+                    Modifier.align(Alignment.TopStart)
+                        .offset(x = width * .10f, y = height * .54f)
+                        .size(width * .55f, height * .08f),
+                ) {
+                    repeat(11) { index ->
+                        val x = size.width * (index / 10f)
+                        drawCircle(
+                            if (index - 2 == selected && block.enabled) accent else Color(0xFF17242D),
+                            radius = size.minDimension * .16f,
+                            center = Offset(x, size.height / 2f),
+                        )
+                    }
+                }
+                val dropSpec = specs["drop"]
+                if (dropSpec != null) {
+                    DroidMiniKnob(
+                        block, dropSpec, width * .77f, height * .47f,
+                        width * .075f, accent, large,
+                    )
+                }
+            }
+            BlockType.AMP -> DroidMiniKnobRow(
+                block, block.type.parameters, width, height, .18f, .075f, .925f,
+                Color(0xFF27E9F2), large, compact = true,
+            )
+            BlockType.IR -> {
+                DroidMiniKnobRow(
+                    block, block.type.parameters, width, height, .16f, .14f, .62f,
+                    Color(0xFF65D9E4), large,
+                )
+                Image(
+                    painterResource(R.drawable.cab), null,
+                    Modifier.align(Alignment.TopStart)
+                        .offset(x = width * .10f, y = height * .42f)
+                        .size(width * .42f, height * .29f),
+                    contentScale = ContentScale.Fit,
+                )
+            }
+            else -> {
+                val rows = if (block.type.parameters.size <= 7) {
+                    listOf(block.type.parameters)
+                } else {
+                    block.type.parameters.chunked(5)
+                }
+                rows.forEachIndexed { index, row ->
+                    DroidMiniKnobRow(
+                        block, row, width, height,
+                        if (rows.size == 1) .20f else if (index == 0) .13f else .44f,
+                        .10f, if (rows.size == 1) .90f else .72f,
+                        accent, large,
+                    )
+                }
+            }
+        }
+
+        if (block.type != BlockType.AMP) {
+            Canvas(
+                Modifier.align(Alignment.TopStart)
+                    .offset(x = width * .845f, y = height * .55f)
+                    .size(width * .026f),
+            ) {
+                drawCircle(if (block.enabled) accent else Color(0xFF26333A))
+                if (block.enabled) drawCircle(Color.White.copy(alpha = .7f), radius = size.minDimension * .20f)
+            }
+            Image(
+                painterResource(R.drawable.delay_footswitch_cap),
+                null,
+                Modifier.align(Alignment.TopStart)
+                    .offset(x = width * .81f, y = height * .62f)
+                    .size(width * .09f),
+                contentScale = ContentScale.Fit,
+            )
+            DroidWordmark(
+                droidChainTitle(block.type),
+                Modifier.align(Alignment.BottomCenter)
+                    .padding(bottom = height * .055f)
+                    .width(width * if (block.type == BlockType.REVERB) .47f else .42f)
+                    .height(height * .12f),
+                if (large) 15.sp else 8.sp,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DroidMiniKnobRow(
+    block: PedalBlock,
+    specs: List<ParameterSpec>,
+    width: androidx.compose.ui.unit.Dp,
+    height: androidx.compose.ui.unit.Dp,
+    y: Float,
+    start: Float,
+    end: Float,
+    tint: Color,
+    large: Boolean,
+    compact: Boolean = false,
+) {
+    if (specs.isEmpty()) return
+    val step = (end - start) / specs.size
+    val knobSize = width * minOf(if (compact) .052f else .072f, step * .70f)
+    specs.forEachIndexed { index, spec ->
+        DroidMiniKnob(
+            block, spec,
+            width * (start + step * (index + .5f)) - knobSize / 2f,
+            height * y,
+            knobSize,
+            tint,
+            large,
+        )
+    }
+}
+
+@Composable
+private fun DroidMiniKnob(
+    block: PedalBlock,
+    spec: ParameterSpec,
+    x: androidx.compose.ui.unit.Dp,
+    y: androidx.compose.ui.unit.Dp,
+    size: androidx.compose.ui.unit.Dp,
+    tint: Color,
+    large: Boolean,
+) {
+    val value = block.parameters[spec.key] ?: spec.default
+    val fraction = ((value - spec.range.start) /
+        (spec.range.endInclusive - spec.range.start)).coerceIn(0f, 1f)
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopStart) {
+        MasterKnob(
+            fraction,
+            tint,
+            Modifier.offset(x = x, y = y).size(size),
+            if (large) 1.5f else .8f,
+        )
     }
 }
 
@@ -947,9 +1138,9 @@ private fun GateDroidEditor(
                 DroidWordmark(
                     "GATE-DROID",
                     Modifier
-                        .align(Alignment.TopStart)
-                        .offset(x = pedalWidth * .30f, y = pedalHeight * .735f)
-                        .size(pedalWidth * .40f, pedalHeight * .105f),
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = pedalHeight * .055f)
+                        .size(pedalWidth * .40f, pedalHeight * .115f),
                     25.sp,
                 )
             }
@@ -1450,10 +1641,10 @@ private fun DelayDroidEditor(
                 DroidWordmark(
                     "DELAY-DROID",
                     Modifier
-                        .align(Alignment.Center)
-                        .offset(y = pedalHeight * .335f)
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = pedalHeight * .055f)
                         .width(pedalWidth * .36f)
-                        .height(pedalHeight * .105f),
+                        .height(pedalHeight * .115f),
                     27.sp,
                 )
             }
@@ -1712,10 +1903,10 @@ private fun ReverbDroidEditor(
                 DroidWordmark(
                     "REVERB-DROID",
                     Modifier
-                        .align(Alignment.Center)
-                        .offset(y = pedalHeight * .335f)
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = pedalHeight * .055f)
                         .width(pedalWidth * .43f)
-                        .height(pedalHeight * .12f),
+                        .height(pedalHeight * .115f),
                     27.sp,
                 )
                 Column(

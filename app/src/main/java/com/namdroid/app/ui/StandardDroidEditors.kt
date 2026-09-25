@@ -185,8 +185,10 @@ internal fun StandardDroidEditor(
                 }
                 DroidWordmark(
                     style.title,
-                    Modifier.align(Alignment.TopCenter)
-                        .offset(y = pedalHeight * .765f).fillMaxWidth(.62f),
+                    Modifier.align(Alignment.BottomCenter)
+                        .padding(bottom = pedalHeight * .055f)
+                        .width(pedalWidth * .62f)
+                        .height(pedalHeight * .115f),
                     if (style.title.length > 13) 22.sp else 27.sp,
                 )
             }
@@ -467,7 +469,12 @@ internal fun CabDroidEditor(
                         Modifier.fillMaxSize().graphicsLayer { translationY = switchDepth }, contentScale = ContentScale.Fit)
                 }
                 DroidWordmark(
-                    "CAB-DROID", Modifier.align(Alignment.TopCenter).offset(y = height * .79f).fillMaxWidth(.46f), 27.sp,
+                    "CAB-DROID",
+                    Modifier.align(Alignment.BottomCenter)
+                        .padding(bottom = height * .055f)
+                        .width(width * .46f)
+                        .height(height * .115f),
+                    27.sp,
                 )
             }
         }
@@ -480,18 +487,20 @@ internal fun DroidWordmark(
     modifier: Modifier,
     fontSize: androidx.compose.ui.unit.TextUnit,
 ) {
-    Text(
-        text = text,
-        modifier = modifier,
-        color = Color.White,
-        fontSize = fontSize,
-        fontFamily = DroidTitleFont,
-        fontWeight = FontWeight.Bold,
-        letterSpacing = 1.1.sp,
-        textAlign = TextAlign.Center,
-        maxLines = 1,
-        overflow = TextOverflow.Clip,
-    )
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Text(
+            text = text,
+            color = Color.White,
+            fontSize = fontSize,
+            lineHeight = fontSize,
+            fontFamily = DroidTitleFont,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.1.sp,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Clip,
+        )
+    }
 }
 
 private fun frontLabel(spec: ParameterSpec): String = when (spec.key) {
