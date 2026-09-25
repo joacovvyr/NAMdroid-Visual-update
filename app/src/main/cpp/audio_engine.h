@@ -216,6 +216,12 @@ private:
     std::atomic<uint64_t> mInputRingRead{0};
     std::atomic<int32_t> mInputTargetFrames{128};
     std::atomic<uint32_t> mInputUnderflowCount{0};
+    double mInputReadPosition{0.0};
+    double mInputNominalRatio{1.0};
+    double mInputAdaptiveRatio{1.0};
+    int32_t mInputMinTargetFrames{128};
+    int32_t mInputMaxTargetFrames{512};
+    uint32_t mInputStableCallbacks{0};
     float mLastInputSample{0.0f};
     float mInputRecoveryGain{0.0f};
     float mGainSmoothingCoefficient{0.002f};
