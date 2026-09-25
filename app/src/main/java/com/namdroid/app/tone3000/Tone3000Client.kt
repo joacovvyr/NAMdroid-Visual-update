@@ -96,17 +96,24 @@ class Tone3000Client(
         accessToken: String,
         query: String,
         page: Int = 1,
-        pageSize: Int = 50,
+        pageSize: Int = 25,
+        sort: String? = null,
+        gear: String? = null,
+        creator: String? = null,
+        verifiedOnly: Boolean = false,
     ): List<Tone> =
         withContext(Dispatchers.IO) {
-            val url = "$baseUrl/tones/search".toHttpUrl().newBuilder()
+            val builder = "$baseUrl/tones/search".toHttpUrl().newBuilder()
                 .addQueryParameter("query", query)
                 .addQueryParameter("page", page.coerceAtLeast(1).toString())
-                .addQueryParameter("page_size", pageSize.coerceIn(10, 100).toString())
-                .addQueryParameter("sort", if (query.isBlank()) "trending" else "best-match")
+                .addQueryParameter("page_size", pageSize.coerceIn(10, 25).toString())
+                .addQueryParameter("sort", sort ?: if (query.isBlank()) "trending" else "best-match")
                 .addQueryParameter("format", "nam")
                 .addQueryParameter("architecture", "2")
-                .build()
+            gear?.takeIf(String::isNotBlank)?.let { builder.addQueryParameter("gears", it) }
+            creator?.takeIf(String::isNotBlank)?.let { builder.addQueryParameter("creators", it) }
+            if (verifiedOnly) builder.addQueryParameter("verified", "true")
+            val url = builder.build()
             val request = Request.Builder()
                 .url(url)
                 .header("Authorization", "Bearer $accessToken")
@@ -120,6 +127,39 @@ class Tone3000Client(
                 parseTones(json)
             }
         }
+
+    suspend fun listCreators(
+        accessToken: String,
+        query: String = "",
+        sort: String = "downloads",
+    ): List<ToneCreator> = withContext(Dispatchers.IO) {
+        val builder = "$baseUrl/users".toHttpUrl().newBuilder()
+            .addQueryParameter("sort", sort)
+            .addQueryParameter("page", "1")
+            .addQueryParameter("page_size", "10")
+        query.trim().takeIf(String::isNotBlank)?.let { builder.addQueryParameter("query", it) }
+        val request = Request.Builder().url(builder.build()).header("Authorization", "Bearer $accessToken").build()
+        http.newCall(request).execute().use { response ->
+            val raw = response.body?.string().orEmpty()
+            if (!response.isSuccessful) throw Tone3000Exception("Perfiles no disponibles (${response.code}): $raw")
+            val data = JSONObject(raw.ifEmpty { "{}" }).optJSONArray("data") ?: return@use emptyList()
+            (0 until data.length()).map { index ->
+                val creator = data.getJSONObject(index)
+                ToneCreator(
+                    id = creator.optLong("id"),
+                    username = creator.optString("username").ifBlank { "creator" },
+                    displayName = creator.optNullableString("display_name"),
+                    avatarUrl = creator.optNullableString("avatar_url"),
+                    verified = creator.optBoolean("is_verified", false),
+                    bio = creator.optNullableString("bio"),
+                    downloadsCount = creator.optInt("downloads_count", 0),
+                    favoritesCount = creator.optInt("favorites_count", 0),
+                    modelsCount = creator.optInt("models_count", 0),
+                    tonesCount = creator.optInt("tones_count", 0),
+                )
+            }
+        }
+    }
 
     suspend fun listTones(accessToken: String, collection: Collection): List<Tone> = withContext(Dispatchers.IO) {
         val url = "$baseUrl/tones/${collection.path}".toHttpUrl().newBuilder().addQueryParameter("page_size", "100").build()
@@ -215,10 +255,14 @@ class Tone3000Client(
         val data = json.optJSONArray("data") ?: return emptyList()
         return (0 until data.length()).map { i ->
             val tone = data.getJSONObject(i)
+            val creator = tone.optJSONObject("user")
             Tone(
                 id = tone.getLong("id"), title = tone.optString("title").ifBlank { "Tono #${tone.optLong("id")}" },
                 gear = tone.optNullableString("gear"), format = tone.optNullableString("format"),
-                creator = tone.optJSONObject("user")?.let { it.optNullableString("display_name") ?: it.optNullableString("username") },
+                creator = creator?.let { it.optNullableString("display_name") ?: it.optNullableString("username") },
+                creatorUsername = creator?.optNullableString("username"),
+                creatorAvatarUrl = creator?.optNullableString("avatar_url"),
+                creatorVerified = creator?.optBoolean("is_verified", false) == true,
                 imageUrl = tone.optJSONArray("images")?.optString(0)?.takeIf { it.isNotBlank() },
                 modelsCount = tone.optInt("models_count", 0), downloadsCount = tone.optInt("downloads_count", 0), isFavorite = tone.optBoolean("is_favorite", false),
             )
