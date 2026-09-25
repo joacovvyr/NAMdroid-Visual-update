@@ -407,13 +407,22 @@ bool AudioEngine::start() {
     mInputRingRead.store(0, std::memory_order_relaxed);
     mInputRingWrite.store(0, std::memory_order_relaxed);
     mInputUnderflowCount.store(0, std::memory_order_relaxed);
+    mInputReadPosition = 0.0;
+    mInputNominalRatio = static_cast<double>(mInStream->getSampleRate()) /
+        std::max(mOutStream->getSampleRate(), 1);
+    mInputAdaptiveRatio = mInputNominalRatio;
+    mInputStableCallbacks = 0;
     mLastInputSample = 0.0f;
     mInputRecoveryGain = 0.0f;
     mCallbackCounter = 0;
     mGainSmoothingCoefficient = 1.0f - std::exp(
         -1.0f / (0.010f * std::max(mSampleRate.load(), 1)));
     const int32_t framesPerBurst = std::max(mOutStream->getFramesPerBurst(), 64);
-    mInputTargetFrames.store(framesPerBurst, std::memory_order_relaxed);
+    const int32_t inputFramesPerBurst = std::max(mInStream->getFramesPerBurst(), 64);
+    mInputMinTargetFrames = std::max(framesPerBurst, inputFramesPerBurst);
+    mInputMaxTargetFrames = std::min(mInputMinTargetFrames * 4,
+        static_cast<int32_t>(kInputRingFrames / 4));
+    mInputTargetFrames.store(mInputMinTargetFrames, std::memory_order_relaxed);
     // Dos bursts absorben jitter del scheduler sin convertir la ruta en alta latencia.
     auto tunedBuffer = mOutStream->setBufferSizeInFrames(framesPerBurst * 2);
     if (tunedBuffer) mBufferSizeFrames.store(tunedBuffer.value());
@@ -627,7 +636,7 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *stream,
     const int32_t outChannels = std::max(mOutChannelCount.load(), 1);
 
     // Consumir la entrada preparada por el callback productor.
-    uint64_t read = mInputRingRead.load(std::memory_order_relaxed);
+    uint64_t read = static_cast<uint64_t>(mInputReadPosition);
     const uint64_t write = mInputRingWrite.load(std::memory_order_acquire);
     uint64_t available = write - read;
     const uint64_t target = static_cast<uint64_t>(
@@ -638,27 +647,66 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *stream,
     if (available > target * 5) {
         const uint64_t excess = available - target * 2;
         read += excess;
+        mInputReadPosition = static_cast<double>(read);
         available -= excess;
         mInputRecoveryGain = 0.0f;
     }
 
-    const int32_t framesRead = static_cast<int32_t>(
-        std::min<uint64_t>(available, static_cast<uint64_t>(frames)));
-    for (int32_t i = 0; i < framesRead; ++i) {
-        const float sample = mInputRing[read & kInputRingMask];
-        ++read;
+    // Un USB full-duplex suele exponer la misma frecuencia nominal en ambos
+    // sentidos, pero sus relojes reales pueden derivar unas pocas ppm. Un
+    // resampler lineal asincrono corrige esa deriva de forma inaudible y evita
+    // que el FIFO termine vacio o lleno. La correccion queda limitada a 0.15 %.
+    const double occupancyError = (static_cast<double>(available) -
+        static_cast<double>(target)) / std::max(static_cast<double>(target), 1.0);
+    const double desiredRatio = mInputNominalRatio *
+        (1.0 + std::clamp(occupancyError * 0.0008, -0.0015, 0.0015));
+    mInputAdaptiveRatio += (desiredRatio - mInputAdaptiveRatio) * 0.025;
+
+    int32_t framesRead = 0;
+    for (; framesRead < frames; ++framesRead) {
+        const uint64_t baseIndex = static_cast<uint64_t>(mInputReadPosition);
+        if (baseIndex + 1 >= write) break;
+        const float fraction = static_cast<float>(
+            mInputReadPosition - static_cast<double>(baseIndex));
+        const float first = mInputRing[baseIndex & kInputRingMask];
+        const float second = mInputRing[(baseIndex + 1) & kInputRingMask];
+        const float sample = first + (second - first) * fraction;
+        mInputReadPosition += mInputAdaptiveRatio;
         mInputRecoveryGain = std::min(1.0f, mInputRecoveryGain + 1.0f / 48.0f);
         mLastInputSample = sample;
-        mInputBuffer[i] = sample * mInputRecoveryGain;
+        mInputBuffer[framesRead] = sample * mInputRecoveryGain;
     }
     if (framesRead < frames) {
         mInputUnderflowCount.fetch_add(1, std::memory_order_relaxed);
+        mInputStableCallbacks = 0;
+        const int32_t currentTarget = mInputTargetFrames.load(std::memory_order_relaxed);
+        if (currentTarget < mInputMaxTargetFrames) {
+            mInputTargetFrames.store(
+                std::min(currentTarget + mInputMinTargetFrames / 2, mInputMaxTargetFrames),
+                std::memory_order_relaxed);
+        }
         for (int32_t i = framesRead; i < frames; ++i) {
             mInputRecoveryGain = std::max(0.0f, mInputRecoveryGain - 1.0f / 32.0f);
             mInputBuffer[i] = mLastInputSample * mInputRecoveryGain;
         }
         if (mInputRecoveryGain <= 0.0f) mLastInputSample = 0.0f;
+    } else {
+        // Tras cinco segundos sin underruns, retirar gradualmente el margen
+        // extra para volver a la menor latencia que soporte el dispositivo.
+        const uint32_t stableThreshold = static_cast<uint32_t>(std::max(
+            (mSampleRate.load() * 5) / std::max(frames, 1), 1));
+        if (++mInputStableCallbacks >= stableThreshold) {
+            mInputStableCallbacks = 0;
+            const int32_t currentTarget = mInputTargetFrames.load(std::memory_order_relaxed);
+            if (currentTarget > mInputMinTargetFrames) {
+                mInputTargetFrames.store(
+                    std::max(currentTarget - mInputMinTargetFrames / 4,
+                             mInputMinTargetFrames),
+                    std::memory_order_relaxed);
+            }
+        }
     }
+    read = static_cast<uint64_t>(mInputReadPosition);
     mInputRingRead.store(read, std::memory_order_release);
 
     const float inputTarget = mInputGainLinear.load();
