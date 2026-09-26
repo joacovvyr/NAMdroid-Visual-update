@@ -178,6 +178,7 @@ JNIEXPORT jint JNICALL Java_com_namdroid_app_audio_NamEngine_nativeGetActualShar
 JNIEXPORT jint JNICALL Java_com_namdroid_app_audio_NamEngine_nativeGetBufferSizeFrames(JNIEnv *, jobject) { return gEngine ? gEngine->getBufferSizeFrames() : 0; }
 JNIEXPORT jint JNICALL Java_com_namdroid_app_audio_NamEngine_nativeGetXRunCount(JNIEnv *, jobject) { return gEngine ? gEngine->getXRunCount() : 0; }
 JNIEXPORT jdouble JNICALL Java_com_namdroid_app_audio_NamEngine_nativeGetCallbackLoadPercent(JNIEnv *, jobject) { return gEngine ? gEngine->getLastCallbackLoadPercent() : 0.0; }
+JNIEXPORT jdouble JNICALL Java_com_namdroid_app_audio_NamEngine_nativeGetNamPeakLoadPercent(JNIEnv *, jobject) { return gEngine ? gEngine->getNamPeakLoadPercent() : 0.0; }
 
 JNIEXPORT jboolean JNICALL
 Java_com_namdroid_app_audio_NamEngine_nativeStartStudioRecording(JNIEnv *env, jobject, jstring path) {
