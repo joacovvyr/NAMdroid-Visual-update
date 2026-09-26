@@ -149,8 +149,11 @@ private fun PedalBlock.toJson() = JSONObject().apply {
 }
 
 fun rigFromJson(json: JSONObject): RigPreset {
-    val blocks = json.getJSONArray("blocks").let { array -> (0 until array.length()).map { index ->
-        val item = array.getJSONObject(index); val type = BlockType.valueOf(item.getString("type")); val values = item.optJSONObject("parameters")
+    val blocks = json.getJSONArray("blocks").let { array -> (0 until array.length()).mapNotNull { index ->
+        val item = array.getJSONObject(index)
+        val type = runCatching { BlockType.valueOf(item.getString("type")) }.getOrNull()
+            ?: return@mapNotNull null
+        val values = item.optJSONObject("parameters")
         val params = type.parameters.associate { spec ->
             val value = values?.optDouble(spec.key, spec.default.toDouble())?.toFloat() ?: spec.default
             spec.key to (if (value.isFinite()) value.coerceIn(spec.range) else spec.default)

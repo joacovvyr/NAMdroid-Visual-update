@@ -62,6 +62,7 @@ fun PedalboardScreen(
     var rigs by remember { mutableStateOf(store.loadAll()) }
     var activeRigIndex by remember { mutableIntStateOf(rigs.indexOfFirst { it.id == store.activeRigId() }.coerceAtLeast(0)) }
     val blocks = remember { mutableStateListOf<PedalBlock>().apply { addAll(rigs[activeRigIndex].blocks) } }
+    val mikuPresent = blocks.any { it.type == BlockType.MIKU }
     var rigName by remember { mutableStateOf(rigs[activeRigIndex].name) }
     var bpm by remember { mutableIntStateOf(rigs[activeRigIndex].bpm) }
     var selectedId by remember { mutableStateOf(blocks.firstOrNull { it.type == BlockType.AMP }?.id ?: blocks.first().id) }
@@ -154,6 +155,34 @@ fun PedalboardScreen(
     }
 
     LaunchedEffect(Unit) { restoreAssets() }
+    LaunchedEffect(mikuPresent) {
+        if (mikuPresent) {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val bankDir = File(context.filesDir, "miku_samples")
+                    bankDir.mkdirs()
+                    context.assets.list("miku_samples")?.forEach { name ->
+                        val target = File(bankDir, name)
+                        if (!target.isFile || target.length() == 0L) {
+                            context.assets.open("miku_samples/$name").use { input ->
+                                FileOutputStream(target).use { output -> input.copyTo(output) }
+                            }
+                        }
+                    }
+                    val manifest = File(context.filesDir, "miku_manifest.json")
+                    if (!manifest.isFile || manifest.length() == 0L) {
+                        context.assets.open("miku_manifest.json").use { input ->
+                            FileOutputStream(manifest).use { output -> input.copyTo(output) }
+                        }
+                    }
+                    engine.loadMikuSamples(bankDir.absolutePath, manifest.absolutePath)
+                }
+            }.onFailure { error ->
+                // Un banco vocal corrupto no puede impedir que abra la pedalera.
+                notice = "Miku no pudo cargar sus samples: ${error.message ?: "archivo inválido"}"
+            }
+        }
+    }
     LaunchedEffect(previewRevision) {
         if (previewRevision == 0) return@LaunchedEffect
         val path = loadedModelPath ?: return@LaunchedEffect

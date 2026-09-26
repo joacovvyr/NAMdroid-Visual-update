@@ -29,8 +29,6 @@ import com.namdroid.app.audio.AudioRouteController
 import com.namdroid.app.ui.*
 import java.io.File
 import java.io.FileOutputStream
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     private val engine = NamEngine()
@@ -82,28 +80,6 @@ private fun AppNav(engine: NamEngine, oauthCallback: Uri?, onOAuthConsumed: () -
     val routeHandler = remember { Handler(Looper.getMainLooper()) }
     var routeChangeToken by remember { mutableIntStateOf(0) }
     LaunchedEffect(Unit) {
-        // Copia una sola vez el banco vocal curado desde assets. La carga WAV
-        // ocurre fuera del hilo de audio y luego el motor publica el banco de
-        // forma atómica para que Miku no agregue I/O al callback.
-        withContext(Dispatchers.IO) {
-            val bankDir = File(context.filesDir, "miku_samples")
-            bankDir.mkdirs()
-            context.assets.list("miku_samples")?.forEach { name ->
-                val target = File(bankDir, name)
-                if (!target.isFile || target.length() == 0L) {
-                    context.assets.open("miku_samples/$name").use { input ->
-                        FileOutputStream(target).use { output -> input.copyTo(output) }
-                    }
-                }
-            }
-            val manifest = File(context.filesDir, "miku_manifest.json")
-            if (!manifest.isFile || manifest.length() == 0L) {
-                context.assets.open("miku_manifest.json").use { input ->
-                    FileOutputStream(manifest).use { output -> input.copyTo(output) }
-                }
-            }
-            engine.loadMikuSamples(bankDir.absolutePath, manifest.absolutePath)
-        }
         val inputId = audioDevices.resolvedInputId()
         val outputId = audioDevices.resolvedOutputId()
         val forceSpeaker = outputId == AudioDeviceManager.FORCE_PHONE_SPEAKER_ID
