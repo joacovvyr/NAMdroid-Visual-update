@@ -422,6 +422,13 @@ private fun SettingsDialog(
     var pendingOutput by remember(outputDeviceId, deviceRevision) { mutableIntStateOf(if (outputs.any { it.id == outputDeviceId }) outputDeviceId else 0) }
     var pendingSharingMode by remember(sharingMode) { mutableIntStateOf(sharingMode.coerceIn(0, 2)) }
     var pendingInputChannelMode by remember(inputChannelMode) { mutableIntStateOf(inputChannelMode.coerceIn(0, 2)) }
+    var diagnosticsRevision by remember { mutableIntStateOf(0) }
+    LaunchedEffect(engine) {
+        while (true) {
+            delay(750)
+            diagnosticsRevision++
+        }
+    }
 
     AlertDialog(
         onDismissRequest = close,
@@ -445,10 +452,16 @@ private fun SettingsDialog(
                 }
                 item { HorizontalDivider() }
                 item {
-                    val actualMode = sharingModeLabel(engine.getActualSharingMode())
+                    // Leer periodicamente: una captura estatica al abrir el dialogo
+                    // no sirve para observar los picos y xruns durante la prueba.
+                    val actualMode = remember(diagnosticsRevision) {
+                        sharingModeLabel(engine.getActualSharingMode())
+                    }
+                    val modelRate = engine.getModelSampleRate().toInt()
+                    val modelRateText = if (modelRate > 0) "$modelRate Hz" else "desconocida"
                     ListItem(
                         headlineContent = { Text("Audio engine") },
-                        supportingContent = { Text("${engine.getStreamSampleRate()} Hz • IN ${engine.getInputChannelCount()}ch / OUT ${engine.getOutputChannelCount()}ch • $actualMode\nBuffer ${engine.getBufferSizeFrames()} frames • DSP ${"%.1f".format(engine.getCallbackLoadPercent())}% • XRuns ${engine.getXRunCount()}") },
+                        supportingContent = { Text("${engine.getStreamSampleRate()} Hz • IN ${engine.getInputChannelCount()}ch / OUT ${engine.getOutputChannelCount()}ch • $actualMode\nNAM $modelRateText • Buffer ${engine.getBufferSizeFrames()} frames\nDSP ${"%.1f".format(engine.getCallbackLoadPercent())}% • NAM pico ${"%.1f".format(engine.getNamPeakLoadPercent())}% • XRuns ${engine.getXRunCount()}") },
                         leadingContent = { Icon(Icons.Default.AudioFile, null) },
                     )
                 }
