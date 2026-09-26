@@ -58,6 +58,7 @@ class NamEngine {
     fun getBufferSizeFrames(): Int = nativeGetBufferSizeFrames()
     fun getXRunCount(): Int = nativeGetXRunCount()
     fun getCallbackLoadPercent(): Double = nativeGetCallbackLoadPercent()
+    fun getNamPeakLoadPercent(): Double = nativeGetNamPeakLoadPercent()
     fun startStudioRecording(path: String): Boolean = nativeStartStudioRecording(path)
     fun stopStudioRecording() = nativeStopStudioRecording()
     fun loadStudioTrack(slot: Int, path: String): String = nativeLoadStudioTrack(slot, path)
@@ -101,6 +102,7 @@ class NamEngine {
     private external fun nativeGetBufferSizeFrames(): Int
     private external fun nativeGetXRunCount(): Int
     private external fun nativeGetCallbackLoadPercent(): Double
+    private external fun nativeGetNamPeakLoadPercent(): Double
     private external fun nativeStartStudioRecording(path: String): Boolean
     private external fun nativeStopStudioRecording()
     private external fun nativeLoadStudioTrack(slot: Int, path: String): String
