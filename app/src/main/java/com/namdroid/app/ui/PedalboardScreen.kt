@@ -323,7 +323,10 @@ fun PedalboardScreen(
             notice = "La cadena admite hasta 16 bloques DSP"
         } else {
             val output = blocks.indexOfFirst { it.type == BlockType.OUTPUT }.let { if (it < 0) blocks.size else it }
-            val block = PedalBlock(type = type, enabled = false)
+            // Miku necesita iniciar activo para comenzar a detectar la nota y
+            // responder apenas se agrega; los demás efectos conservan el
+            // comportamiento existente de entrar en bypass.
+            val block = PedalBlock(type = type, enabled = type == BlockType.MIKU)
             blocks.add(output, block); selectedId = block.id; syncEngine(); persist()
         }
         showAddBlock = false
