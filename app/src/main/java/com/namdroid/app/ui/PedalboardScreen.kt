@@ -461,7 +461,7 @@ private fun SettingsDialog(
                     val modelRateText = if (modelRate > 0) "$modelRate Hz" else "desconocida"
                     ListItem(
                         headlineContent = { Text("Audio engine") },
-                        supportingContent = { Text("${engine.getStreamSampleRate()} Hz • IN ${engine.getInputChannelCount()}ch / OUT ${engine.getOutputChannelCount()}ch • $actualMode\nNAM $modelRateText • Buffer ${engine.getBufferSizeFrames()} frames\nDSP ${"%.1f".format(engine.getCallbackLoadPercent())}% • NAM pico ${"%.1f".format(engine.getNamPeakLoadPercent())}% • XRuns ${engine.getXRunCount()}") },
+                        supportingContent = { Text("${engine.getStreamSampleRate()} Hz • IN ${engine.getInputChannelCount()}ch / OUT ${engine.getOutputChannelCount()}ch • $actualMode\nNAM $modelRateText • Buffer ${engine.getBufferSizeFrames()} frames\nDSP ${"%.1f".format(engine.getCallbackLoadPercent())}% • NAM pico ${"%.1f".format(engine.getNamPeakLoadPercent())}%\nSalida XRuns ${engine.getOutputXRunCount()} • Entrada sin datos ${engine.getInputUnderflowCount()}") },
                         leadingContent = { Icon(Icons.Default.AudioFile, null) },
                     )
                 }
