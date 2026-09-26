@@ -34,6 +34,12 @@ file(GLOB NAM_SOURCES
 # el linker no puede podar nada.
 add_library(nam_core OBJECT ${NAM_SOURCES})
 target_include_directories(nam_core PUBLIC ${NAM_DIR})
+# El APK instalable se construye con assembleDebug. Las flags de Debug del
+# NDK pueden prevalecer sobre cppFlags de Gradle; aplicar -O3 al target al
+# final de las opciones conserva la implementacion NAM original y evita
+# cargar la red neuronal sin optimizar en el telefono. No usar fast-math ni
+# la ruta A2 alternativa, que alteraron el sonido en dispositivos reales.
+target_compile_options(nam_core PRIVATE -O3)
 
 # Oboe via prefab (declarado en build.gradle.kts)
 find_package(oboe REQUIRED CONFIG)
@@ -51,3 +57,5 @@ target_link_libraries(namdroid_native
     android
     log
 )
+
+target_compile_options(namdroid_native PRIVATE -O3)

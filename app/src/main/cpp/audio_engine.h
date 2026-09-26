@@ -78,6 +78,8 @@ public:
     int32_t getActualSharingMode() const { return mActualSharingMode.load(); }
     int32_t getBufferSizeFrames() const { return mBufferSizeFrames.load(); }
     int32_t getXRunCount() const { return mXRunCount.load(); }
+    int32_t getOutputXRunCount() const { return mOutputXRunCount.load(); }
+    uint32_t getInputUnderflowCount() const { return mInputUnderflowCount.load(); }
 
     // oboe::AudioStreamDataCallback
     oboe::DataCallbackResult onAudioReady(oboe::AudioStream *outputStream, void *audioData,
@@ -217,6 +219,7 @@ private:
     std::atomic<int32_t> mInputChannelMode{0};
     std::atomic<int32_t> mBufferSizeFrames{0};
     std::atomic<int32_t> mXRunCount{0};
+    std::atomic<int32_t> mOutputXRunCount{0};
     std::atomic<bool> mCrossfadeRequested{false};
 
     // Objetivos atomicos + valores suavizados usados solamente por audio.

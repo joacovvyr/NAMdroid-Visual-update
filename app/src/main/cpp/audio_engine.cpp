@@ -572,6 +572,7 @@ bool AudioEngine::start() {
         mBufferSizeFrames.store(mOutStream->getBufferSizeInFrames());
         auto xruns = mOutStream->getXRunCount();
         mXRunCount.store(xruns ? xruns.value() : 0);
+        mOutputXRunCount.store(xruns ? xruns.value() : 0);
         return true;
     };
 
@@ -1737,6 +1738,7 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *stream,
         if (mOutStream) {
             auto xruns = mOutStream->getXRunCount();
             if (xruns) {
+                mOutputXRunCount.store(xruns.value(), std::memory_order_relaxed);
                 mXRunCount.store(
                     xruns.value() + static_cast<int32_t>(
                         mInputUnderflowCount.load(std::memory_order_relaxed)));
