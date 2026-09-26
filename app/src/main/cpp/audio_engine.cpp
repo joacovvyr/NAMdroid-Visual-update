@@ -68,6 +68,7 @@ AudioEngine::~AudioEngine() {
 }
 
 void AudioEngine::tunerWorkerLoop() {
+    auto nextBufferCheck = std::chrono::steady_clock::now();
     while (mTunerWorkerRunning.load(std::memory_order_acquire)) {
         if (mRecoveryRequested.exchange(false, std::memory_order_acq_rel)) {
             LOGI("Recuperando streams fuera del callback de error");
@@ -77,6 +78,38 @@ void AudioEngine::tunerWorkerLoop() {
                 mInputDeviceId.store(0);
                 mOutputDeviceId.store(0);
                 start();
+            }
+        }
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= nextBufferCheck) {
+            nextBufferCheck = now + std::chrono::milliseconds(500);
+            std::lock_guard<std::recursive_mutex> streamLock(mStreamMutex);
+            if (mOutStream) {
+                const auto xruns = mOutStream->getXRunCount();
+                if (xruns) {
+                    const int32_t currentXruns = xruns.value();
+                    const bool namActive = mNamProcessingActive.load(std::memory_order_acquire);
+                    const int32_t burst = std::max(mOutStream->getFramesPerBurst(), 1);
+                    const int32_t currentBuffer = mOutStream->getBufferSizeInFrames();
+                    const int32_t capacity = mOutStream->getBufferCapacityInFrames();
+                    int32_t requested = currentBuffer;
+                    if (namActive && !mNamBufferPrimed) {
+                        requested = std::min(burst * 3, capacity);
+                        mNamBufferPrimed = true;
+                    } else if (namActive && currentXruns > mLastOutputXruns) {
+                        requested = std::min(currentBuffer + burst,
+                                             std::min(burst * 5, capacity));
+                    }
+                    if (requested > currentBuffer) {
+                        const auto result = mOutStream->setBufferSizeInFrames(requested);
+                        if (result && result.value() > currentBuffer) {
+                            mBufferSizeFrames.store(result.value(), std::memory_order_relaxed);
+                            LOGI("NAM: buffer de salida %d -> %d frames, xruns=%d",
+                                 currentBuffer, result.value(), currentXruns);
+                        }
+                    }
+                    mLastOutputXruns = currentXruns;
+                }
             }
         }
         bool analysed = false;
@@ -465,6 +498,7 @@ void AudioEngine::processIrPartition() {
 }
 
 bool AudioEngine::start() {
+    std::lock_guard<std::recursive_mutex> streamLock(mStreamMutex);
     // Siempre partir de un estado limpio. Esto hace que los cambios de I/O
     // sean idempotentes aunque una apertura anterior haya fallado a medias.
     stop();
@@ -564,6 +598,11 @@ bool AudioEngine::start() {
         stop();
         return false;
     }
+    mNamProcessingActive.store(false, std::memory_order_release);
+    mNamPeakLoadPercent.store(0.0, std::memory_order_relaxed);
+    mNamBufferPrimed = false;
+    const auto outputXruns = mOutStream->getXRunCount();
+    mLastOutputXruns = outputXruns ? outputXruns.value() : 0;
 
     LOGI("Routing IN id=%d -> OUT id=%d | salida: %d Hz, %d canal(es) | entrada: %d Hz, %d canal(es)",
          mInputDeviceId.load(), mOutputDeviceId.load(),
@@ -721,6 +760,8 @@ bool AudioEngine::start() {
 }
 
 void AudioEngine::stop() {
+    std::lock_guard<std::recursive_mutex> streamLock(mStreamMutex);
+    mNamProcessingActive.store(false, std::memory_order_release);
     if (mOutStream) {
         mOutStream->requestStop();
         mOutStream->close();
@@ -802,6 +843,7 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *stream,
         ? std::chrono::steady_clock::now()
         : std::chrono::steady_clock::time_point{};
     auto *output = static_cast<float *>(audioData);
+    mNamProcessingActive.store(false, std::memory_order_relaxed);
 
     // Nunca alocar en el callback de audio: si por lo que sea nos piden mas
     // frames que los reservados en start(), recortamos en vez de hacer
@@ -1090,9 +1132,23 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *stream,
             {
                 std::unique_lock<std::mutex> lock(mModelMutex, std::try_to_lock);
                 if (lock.owns_lock() && mModel) {
+                    mNamProcessingActive.store(true, std::memory_order_release);
+                    const auto namStarted = sampleTelemetry
+                        ? std::chrono::steady_clock::now()
+                        : std::chrono::steady_clock::time_point{};
                     NAM_SAMPLE *inPtr = mDspInPtrStorage.data();
                     NAM_SAMPLE *outPtr = mDspOutPtrStorage.data();
                     mModel->process(&inPtr, &outPtr, frames);
+                    if (sampleTelemetry) {
+                        const double elapsed = std::chrono::duration<double>(
+                            std::chrono::steady_clock::now() - namStarted).count();
+                        const double budget = static_cast<double>(std::max(frames, 1)) /
+                            std::max(mSampleRate.load(), 1);
+                        const double load = std::clamp(elapsed / budget * 100.0, 0.0, 999.0);
+                        const double peak = mNamPeakLoadPercent.load(std::memory_order_relaxed);
+                        mNamPeakLoadPercent.store(std::max(load, peak * 0.995),
+                                                  std::memory_order_relaxed);
+                    }
                     for (int32_t i = 0; i < frames; ++i) mMonoResult[i] = mDspOutPtrStorage[i];
                 }
             }
