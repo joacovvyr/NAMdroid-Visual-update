@@ -4,16 +4,8 @@ project(namdroid_native)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Usamos float en todo el motor NAM (mucho mas rapido que double en telefonos).
-# Activamos tambien la ruta A2 especializada: varios modelos WaveNet de
-# TONE3000 tienen exactamente esta arquitectura y la implementacion generica
-# de Eigen puede producir picos de CPU suficientes para provocar xruns en
-# telefonos cuando el callback trabaja con buffers pequenos.
-add_compile_definitions(
-    NAM_SAMPLE_FLOAT
-    NAM_ENABLE_A2_FAST=1
-    NAM_A2_RING_MODE=1
-)
+# Usamos float en todo el motor NAM (mucho mas rapido que double en telefonos)
+add_compile_definitions(NAM_SAMPLE_FLOAT)
 
 set(NAM_DIR ${CMAKE_CURRENT_SOURCE_DIR}/nam)
 
@@ -42,10 +34,6 @@ file(GLOB NAM_SOURCES
 # el linker no puede podar nada.
 add_library(nam_core OBJECT ${NAM_SOURCES})
 target_include_directories(nam_core PUBLIC ${NAM_DIR})
-# El motor se ejecuta dentro del callback de Oboe. Estas opciones reducen el
-# costo de las operaciones matematicas del DSP y evitan que el compilador
-# deje la ruta neural en una optimizacion conservadora de Debug.
-target_compile_options(nam_core PRIVATE -O3 -ffast-math -fno-math-errno)
 
 # Oboe via prefab (declarado en build.gradle.kts)
 find_package(oboe REQUIRED CONFIG)
@@ -63,5 +51,3 @@ target_link_libraries(namdroid_native
     android
     log
 )
-
-target_compile_options(namdroid_native PRIVATE -O3 -ffast-math -fno-math-errno)
