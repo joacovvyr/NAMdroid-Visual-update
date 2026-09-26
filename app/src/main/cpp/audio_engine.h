@@ -72,6 +72,7 @@ public:
     double getLastModelSampleRate() const { return mLastModelSampleRate.load(); }
     int32_t getStreamSampleRate() const { return mSampleRate.load(); }
     double getLastCallbackLoadPercent() const { return mLastLoadPercent.load(); }
+    double getNamPeakLoadPercent() const { return mNamPeakLoadPercent.load(); }
     int32_t getInputChannelCount() const { return mInChannelCount.load(); }
     int32_t getOutputChannelCount() const { return mOutChannelCount.load(); }
     int32_t getActualSharingMode() const { return mActualSharingMode.load(); }
@@ -114,6 +115,13 @@ private:
 
     std::shared_ptr<oboe::AudioStream> mOutStream;
     std::shared_ptr<oboe::AudioStream> mInStream;
+    // El worker ajusta el margen de salida fuera del callback de tiempo real.
+    // start()/stop() y la recuperacion usan el mismo candado.
+    std::recursive_mutex mStreamMutex;
+    std::atomic<bool> mNamProcessingActive{false};
+    std::atomic<double> mNamPeakLoadPercent{0.0};
+    int32_t mLastOutputXruns{0};
+    bool mNamBufferPrimed{false};
 
     // El modelo se accede solo desde el hilo de audio salvo por este mutex
     // que protege el *reemplazo* del puntero (carga de un nuevo .nam).
