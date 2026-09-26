@@ -62,6 +62,7 @@ fun PedalboardScreen(
     var rigs by remember { mutableStateOf(store.loadAll()) }
     var activeRigIndex by remember { mutableIntStateOf(rigs.indexOfFirst { it.id == store.activeRigId() }.coerceAtLeast(0)) }
     val blocks = remember { mutableStateListOf<PedalBlock>().apply { addAll(rigs[activeRigIndex].blocks) } }
+    val mikuPresent = blocks.any { it.type == BlockType.MIKU }
     var rigName by remember { mutableStateOf(rigs[activeRigIndex].name) }
     var bpm by remember { mutableIntStateOf(rigs[activeRigIndex].bpm) }
     var selectedId by remember { mutableStateOf(blocks.firstOrNull { it.type == BlockType.AMP }?.id ?: blocks.first().id) }
@@ -154,6 +155,34 @@ fun PedalboardScreen(
     }
 
     LaunchedEffect(Unit) { restoreAssets() }
+    LaunchedEffect(mikuPresent) {
+        if (mikuPresent) {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val bankDir = File(context.filesDir, "miku_samples")
+                    bankDir.mkdirs()
+                    context.assets.list("miku_samples")?.forEach { name ->
+                        val target = File(bankDir, name)
+                        if (!target.isFile || target.length() == 0L) {
+                            context.assets.open("miku_samples/$name").use { input ->
+                                FileOutputStream(target).use { output -> input.copyTo(output) }
+                            }
+                        }
+                    }
+                    val manifest = File(context.filesDir, "miku_manifest.json")
+                    if (!manifest.isFile || manifest.length() == 0L) {
+                        context.assets.open("miku_manifest.json").use { input ->
+                            FileOutputStream(manifest).use { output -> input.copyTo(output) }
+                        }
+                    }
+                    engine.loadMikuSamples(bankDir.absolutePath, manifest.absolutePath)
+                }
+            }.onFailure { error ->
+                // Un banco vocal corrupto no puede impedir que abra la pedalera.
+                notice = "Miku no pudo cargar sus samples: ${error.message ?: "archivo inválido"}"
+            }
+        }
+    }
     LaunchedEffect(previewRevision) {
         if (previewRevision == 0) return@LaunchedEffect
         val path = loadedModelPath ?: return@LaunchedEffect
@@ -294,7 +323,10 @@ fun PedalboardScreen(
             notice = "La cadena admite hasta 16 bloques DSP"
         } else {
             val output = blocks.indexOfFirst { it.type == BlockType.OUTPUT }.let { if (it < 0) blocks.size else it }
-            val block = PedalBlock(type = type, enabled = false)
+            // Miku necesita iniciar activo para comenzar a detectar la nota y
+            // responder apenas se agrega; los demás efectos conservan el
+            // comportamiento existente de entrar en bypass.
+            val block = PedalBlock(type = type, enabled = type == BlockType.MIKU)
             blocks.add(output, block); selectedId = block.id; syncEngine(); persist()
         }
         showAddBlock = false
@@ -422,6 +454,13 @@ private fun SettingsDialog(
     var pendingOutput by remember(outputDeviceId, deviceRevision) { mutableIntStateOf(if (outputs.any { it.id == outputDeviceId }) outputDeviceId else 0) }
     var pendingSharingMode by remember(sharingMode) { mutableIntStateOf(sharingMode.coerceIn(0, 2)) }
     var pendingInputChannelMode by remember(inputChannelMode) { mutableIntStateOf(inputChannelMode.coerceIn(0, 2)) }
+    var diagnosticsRevision by remember { mutableIntStateOf(0) }
+    LaunchedEffect(engine) {
+        while (true) {
+            delay(750)
+            diagnosticsRevision++
+        }
+    }
 
     AlertDialog(
         onDismissRequest = close,
@@ -445,10 +484,16 @@ private fun SettingsDialog(
                 }
                 item { HorizontalDivider() }
                 item {
-                    val actualMode = sharingModeLabel(engine.getActualSharingMode())
+                    // Leer periodicamente: una captura estatica al abrir el dialogo
+                    // no sirve para observar los picos y xruns durante la prueba.
+                    val actualMode = remember(diagnosticsRevision) {
+                        sharingModeLabel(engine.getActualSharingMode())
+                    }
+                    val modelRate = engine.getModelSampleRate().toInt()
+                    val modelRateText = if (modelRate > 0) "$modelRate Hz" else "desconocida"
                     ListItem(
                         headlineContent = { Text("Audio engine") },
-                        supportingContent = { Text("${engine.getStreamSampleRate()} Hz • IN ${engine.getInputChannelCount()}ch / OUT ${engine.getOutputChannelCount()}ch • $actualMode\nBuffer ${engine.getBufferSizeFrames()} frames • DSP ${"%.1f".format(engine.getCallbackLoadPercent())}% • XRuns ${engine.getXRunCount()}") },
+                        supportingContent = { Text("${engine.getStreamSampleRate()} Hz • IN ${engine.getInputChannelCount()}ch / OUT ${engine.getOutputChannelCount()}ch • $actualMode\nNAM $modelRateText • Buffer ${engine.getBufferSizeFrames()} frames\nDSP ${"%.1f".format(engine.getCallbackLoadPercent())}% • NAM pico ${"%.1f".format(engine.getNamPeakLoadPercent())}%\nSalida XRuns ${engine.getOutputXRunCount()} • Entrada sin datos ${engine.getInputUnderflowCount()}") },
                         leadingContent = { Icon(Icons.Default.AudioFile, null) },
                     )
                 }

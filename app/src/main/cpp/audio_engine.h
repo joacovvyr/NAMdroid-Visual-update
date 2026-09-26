@@ -34,6 +34,8 @@ public:
     // el hilo de audio.
     bool loadModel(const std::string &namFilePath, std::string &outError);
     bool loadIr(const std::string &wavPath, std::string &outError);
+    bool loadMikuSamples(const std::string &directory, const std::string &manifestPath,
+                         std::string &outError);
 
     void setInputGainDb(float db) { mInputGainLinear.store(dbToLinear(db)); }
     void setOutputGainDb(float db) { mOutputGainLinear.store(dbToLinear(db)); }
@@ -45,6 +47,7 @@ public:
     void setEffectChain(const int *types, const bool *enabled, const float *params, int count);
     void beginTransition() { requestCrossfade(); }
     void setTunerEnabled(bool enabled) { mTunerEnabled.store(enabled); }
+    void setMikuEnabled(bool enabled) { mMikuEnabled.store(enabled); }
     void setAudioDeviceIds(int32_t inputDeviceId, int32_t outputDeviceId) {
         mInputDeviceId.store(inputDeviceId);
         mOutputDeviceId.store(outputDeviceId);
@@ -72,11 +75,14 @@ public:
     double getLastModelSampleRate() const { return mLastModelSampleRate.load(); }
     int32_t getStreamSampleRate() const { return mSampleRate.load(); }
     double getLastCallbackLoadPercent() const { return mLastLoadPercent.load(); }
+    double getNamPeakLoadPercent() const { return mNamPeakLoadPercent.load(); }
     int32_t getInputChannelCount() const { return mInChannelCount.load(); }
     int32_t getOutputChannelCount() const { return mOutChannelCount.load(); }
     int32_t getActualSharingMode() const { return mActualSharingMode.load(); }
     int32_t getBufferSizeFrames() const { return mBufferSizeFrames.load(); }
     int32_t getXRunCount() const { return mXRunCount.load(); }
+    int32_t getOutputXRunCount() const { return mOutputXRunCount.load(); }
+    uint32_t getInputUnderflowCount() const { return mInputUnderflowCount.load(); }
 
     // oboe::AudioStreamDataCallback
     oboe::DataCallbackResult onAudioReady(oboe::AudioStream *outputStream, void *audioData,
@@ -114,6 +120,13 @@ private:
 
     std::shared_ptr<oboe::AudioStream> mOutStream;
     std::shared_ptr<oboe::AudioStream> mInStream;
+    // El worker ajusta el margen de salida fuera del callback de tiempo real.
+    // start()/stop() y la recuperacion usan el mismo candado.
+    std::recursive_mutex mStreamMutex;
+    std::atomic<bool> mNamProcessingActive{false};
+    std::atomic<double> mNamPeakLoadPercent{0.0};
+    int32_t mLastOutputXruns{0};
+    bool mNamBufferPrimed{false};
 
     // El modelo se accede solo desde el hilo de audio salvo por este mutex
     // que protege el *reemplazo* del puntero (carga de un nuevo .nam).
@@ -125,10 +138,10 @@ private:
     std::atomic<bool> mBypass{false};
     // IDs: 1 gate, 2 drive, 3 NAM, 4 EQ, 5 delay, 6 reverb,
     // 7 IR cabinet, 8 compressor, 9 chorus, 10 wah, 11 auto-wah,
-    // 12 tremolo, 13 expression pitch, 14 drop detune.
-    std::array<std::atomic<bool>, 15> mEffectEnabled{};
-    std::array<std::atomic<float>, 15> mEffectAmount{};
-    std::array<std::array<std::atomic<float>, 3>, 15> mEffectParams{};
+    // 12 tremolo, 13 expression pitch, 14 drop detune, 15 Miku vocal synth.
+    std::array<std::atomic<bool>, 16> mEffectEnabled{};
+    std::array<std::atomic<float>, 16> mEffectAmount{};
+    std::array<std::array<std::atomic<float>, 3>, 16> mEffectParams{};
     std::array<std::atomic<int>, 9> mEffectOrder{};
     std::atomic<int> mEffectCount{9};
     struct EffectSlot {
@@ -179,12 +192,18 @@ private:
         float pitchMixSmoothed{0.0f};
         float pitchLevelSmoothed{1.0f};
         float pitchWetGain{0.0f};
+        size_t mikuSampleIndex{0};
+        double mikuReadPosition{0.0};
+        float mikuRatioSmoothed{1.0f};
+        float mikuVoiceGain{0.0f};
+        int mikuMidiNote{-999};
     };
     std::array<EffectSlot, kMaxEffectSlots> mEffectSlots;
     std::atomic<int> mEffectSlotCount{0};
     std::atomic<float> mInputLevelDb{-90.0f};
     std::atomic<float> mOutputLevelDb{-90.0f};
     std::atomic<bool> mTunerEnabled{false};
+    std::atomic<bool> mMikuEnabled{false};
     std::atomic<float> mDetectedFrequency{0.0f};
     std::atomic<int> mLooperState{0}; // 0 stopped, 1 record, 2 play, 3 overdub
     std::atomic<int> mPendingLooperCommand{-1};
@@ -209,6 +228,7 @@ private:
     std::atomic<int32_t> mInputChannelMode{0};
     std::atomic<int32_t> mBufferSizeFrames{0};
     std::atomic<int32_t> mXRunCount{0};
+    std::atomic<int32_t> mOutputXRunCount{0};
     std::atomic<bool> mCrossfadeRequested{false};
 
     // Objetivos atomicos + valores suavizados usados solamente por audio.
@@ -253,6 +273,15 @@ private:
         std::atomic<bool> muted{false};
     };
     std::array<std::shared_ptr<StudioTrack>, kMaxStudioTracks> mStudioTracks{};
+    struct MikuSample {
+        std::vector<float> samples;
+        float baseHz{440.0f};
+        uint32_t sampleRate{44100};
+        size_t loopStart{0};
+        size_t loopEnd{0};
+    };
+    std::shared_ptr<const std::vector<MikuSample>> mMikuSamples;
+    std::mutex mMikuMutex;
     std::atomic<bool> mStudioPlaying{false};
     std::atomic<bool> mStudioMetronome{false};
     std::atomic<float> mStudioBpm{120.0f};
@@ -293,6 +322,11 @@ private:
     size_t mLooperLength{0};
     size_t mTunerWriteIndex{0};
     int mTunerWriteBuffer{0};
+    size_t mMikuSampleIndex{0};
+    double mMikuReadPosition{0.0};
+    float mMikuRatioSmoothed{1.0f};
+    float mMikuVoiceGain{0.0f};
+    int mMikuMidiNote{-999};
     size_t mIrBlockIndex{0};
     size_t mIrSpectrumIndex{0};
     float mChorusPhase{0.0f};

@@ -7,9 +7,11 @@
 #include <cstring>
 #include <fstream>
 #include <chrono>
+#include <limits>
 #include <thread>
 
 #include "NAM/get_dsp.h"
+#include "third_party/nlohmann/json.hpp"
 
 #define TAG "NAMDroid/AudioEngine"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
@@ -68,6 +70,7 @@ AudioEngine::~AudioEngine() {
 }
 
 void AudioEngine::tunerWorkerLoop() {
+    auto nextBufferCheck = std::chrono::steady_clock::now();
     while (mTunerWorkerRunning.load(std::memory_order_acquire)) {
         if (mRecoveryRequested.exchange(false, std::memory_order_acq_rel)) {
             LOGI("Recuperando streams fuera del callback de error");
@@ -77,6 +80,38 @@ void AudioEngine::tunerWorkerLoop() {
                 mInputDeviceId.store(0);
                 mOutputDeviceId.store(0);
                 start();
+            }
+        }
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= nextBufferCheck) {
+            nextBufferCheck = now + std::chrono::milliseconds(500);
+            std::lock_guard<std::recursive_mutex> streamLock(mStreamMutex);
+            if (mOutStream) {
+                const auto xruns = mOutStream->getXRunCount();
+                if (xruns) {
+                    const int32_t currentXruns = xruns.value();
+                    const bool namActive = mNamProcessingActive.load(std::memory_order_acquire);
+                    const int32_t burst = std::max(mOutStream->getFramesPerBurst(), 1);
+                    const int32_t currentBuffer = mOutStream->getBufferSizeInFrames();
+                    const int32_t capacity = mOutStream->getBufferCapacityInFrames();
+                    int32_t requested = currentBuffer;
+                    if (namActive && !mNamBufferPrimed) {
+                        requested = std::min(burst * 3, capacity);
+                        mNamBufferPrimed = true;
+                    } else if (namActive && currentXruns > mLastOutputXruns) {
+                        requested = std::min(currentBuffer + burst,
+                                             std::min(burst * 5, capacity));
+                    }
+                    if (requested > currentBuffer) {
+                        const auto result = mOutStream->setBufferSizeInFrames(requested);
+                        if (result && result.value() > currentBuffer) {
+                            mBufferSizeFrames.store(result.value(), std::memory_order_relaxed);
+                            LOGI("NAM: buffer de salida %d -> %d frames, xruns=%d",
+                                 currentBuffer, result.value(), currentXruns);
+                        }
+                    }
+                    mLastOutputXruns = currentXruns;
+                }
             }
         }
         bool analysed = false;
@@ -95,7 +130,8 @@ void AudioEngine::tunerWorkerLoop() {
 
 void AudioEngine::analyseTunerBuffer(
         const std::array<float, kTunerBufferFrames> &samples) {
-    if (!mTunerEnabled.load(std::memory_order_relaxed)) return;
+    if (!mTunerEnabled.load(std::memory_order_relaxed) &&
+        !mMikuEnabled.load(std::memory_order_relaxed)) return;
     const int sampleRate = std::max(mSampleRate.load(), 1);
     const int minLag = std::max(sampleRate / 1200, 1);
     const int maxLag = std::min<int>(sampleRate / 55, samples.size() / 2);
@@ -127,14 +163,14 @@ void AudioEngine::analyseTunerBuffer(
 }
 
 void AudioEngine::setEffectEnabled(int effectId, bool enabled) {
-    if (effectId >= 1 && effectId <= 14) {
+    if (effectId >= 1 && effectId <= 15) {
         const bool changed = mEffectEnabled[effectId].exchange(enabled) != enabled;
         if (changed) requestCrossfade();
     }
 }
 
 void AudioEngine::setEffectAmount(int effectId, float amount) {
-    if (effectId >= 1 && effectId <= 14) {
+    if (effectId >= 1 && effectId <= 15) {
         mEffectAmount[effectId].store(std::clamp(amount, 0.0f, 1.0f));
     }
 }
@@ -151,20 +187,22 @@ void AudioEngine::setEffectOrder(const int *order, int count) {
 }
 
 void AudioEngine::setEffectParam(int effectId, int param, float value) {
-    if (effectId >= 1 && effectId <= 14 && param >= 0 && param < 3) mEffectParams[effectId][param].store(value);
+    if (effectId >= 1 && effectId <= 15 && param >= 0 && param < 3) mEffectParams[effectId][param].store(value);
 }
 
 void AudioEngine::setEffectChain(const int *types, const bool *enabled,
                                  const float *params, int count) {
     if (!types || !enabled || !params || count < 0 || count > kMaxEffectSlots) return;
     bool structuralChange = mEffectSlotCount.load(std::memory_order_acquire) != count;
+    bool mikuActive = false;
     for (int slot = 0; slot < count; ++slot) {
         auto &target = mEffectSlots[slot];
-        const int newType = std::clamp(types[slot], 1, 14);
+        const int newType = std::clamp(types[slot], 1, 15);
         structuralChange = structuralChange || target.type.load() != newType ||
             target.enabled.load() != enabled[slot];
         target.type.store(newType, std::memory_order_relaxed);
         target.enabled.store(enabled[slot], std::memory_order_relaxed);
+        mikuActive = mikuActive || (newType == 15 && enabled[slot]);
         for (int param = 0; param < kMaxEffectParams; ++param) {
             target.params[param].store(params[slot * kMaxEffectParams + param], std::memory_order_relaxed);
         }
@@ -173,6 +211,7 @@ void AudioEngine::setEffectChain(const int *types, const bool *enabled,
         mEffectSlots[slot].enabled.store(false, std::memory_order_relaxed);
     }
     mEffectSlotCount.store(count, std::memory_order_release);
+    mMikuEnabled.store(mikuActive, std::memory_order_release);
     if (structuralChange) requestCrossfade();
 }
 
@@ -345,6 +384,75 @@ void AudioEngine::setStudioTransport(bool playing, float bpm, bool metronome) {
     }
 }
 
+bool AudioEngine::loadMikuSamples(const std::string &directory,
+                                  const std::string &manifestPath,
+                                  std::string &outError) {
+    // Esta rutina corre desde JNI, nunca desde el callback de audio. El banco
+    // completo queda preparado en memoria antes de publicarlo atómicamente.
+    std::ifstream manifestFile(manifestPath);
+    if (!manifestFile) { outError = "No se pudo abrir el manifiesto vocal"; return false; }
+    nlohmann::json manifest;
+    try { manifestFile >> manifest; }
+    catch (...) { outError = "Manifiesto vocal inválido"; return false; }
+    const auto entries = manifest.value("samples", nlohmann::json::array());
+    auto bank = std::make_shared<std::vector<MikuSample>>();
+    bank->reserve(entries.size());
+
+    for (const auto &entry : entries) {
+        const std::string name = entry.value("file", "");
+        if (name.empty() || name.find("..") != std::string::npos || name.find('/') != std::string::npos)
+            continue;
+        std::ifstream file(directory + "/" + name, std::ios::binary);
+        if (!file) continue;
+        char riff[4]{}, wave[4]{}; uint32_t riffSize = 0;
+        file.read(riff, 4); file.read(reinterpret_cast<char *>(&riffSize), 4); file.read(wave, 4);
+        if (std::strncmp(riff, "RIFF", 4) || std::strncmp(wave, "WAVE", 4)) continue;
+        uint16_t format = 0, channels = 0, bits = 0; uint32_t sampleRate = 0, dataSize = 0;
+        std::streampos dataPos{}; bool hasData = false;
+        while (file && !hasData) {
+            char id[4]{}; uint32_t size = 0;
+            file.read(id, 4); file.read(reinterpret_cast<char *>(&size), 4);
+            if (!file) break;
+            if (!std::strncmp(id, "fmt ", 4)) {
+                file.read(reinterpret_cast<char *>(&format), 2);
+                file.read(reinterpret_cast<char *>(&channels), 2);
+                file.read(reinterpret_cast<char *>(&sampleRate), 4);
+                file.seekg(6, std::ios::cur); file.read(reinterpret_cast<char *>(&bits), 2);
+                if (size > 16) file.seekg(size - 16, std::ios::cur);
+            } else if (!std::strncmp(id, "data", 4)) {
+                dataPos = file.tellg(); dataSize = size; hasData = true;
+                file.seekg(size, std::ios::cur);
+            } else file.seekg(size, std::ios::cur);
+            if (size & 1u) file.seekg(1, std::ios::cur);
+        }
+        if (!hasData || format != 1 || channels == 0 || bits != 16 || sampleRate == 0) continue;
+        const size_t frameCount = dataSize / (static_cast<size_t>(channels) * 2u);
+        if (frameCount < 256 || frameCount > static_cast<size_t>(sampleRate) * 8u) continue;
+        MikuSample sample;
+        sample.sampleRate = sampleRate;
+        sample.samples.resize(frameCount);
+        file.clear(); file.seekg(dataPos);
+        for (size_t frame = 0; frame < frameCount; ++frame) {
+            int32_t sum = 0;
+            for (uint16_t channel = 0; channel < channels; ++channel) {
+                int16_t value = 0; file.read(reinterpret_cast<char *>(&value), sizeof(value)); sum += value;
+            }
+            sample.samples[frame] = static_cast<float>(sum) /
+                (32768.0f * static_cast<float>(channels));
+        }
+        sample.baseHz = std::clamp(entry.value("detectedHz", 440.0f), 40.0f, 2000.0f);
+        sample.loopStart = std::min<size_t>(entry.value("loopStartFrame", 0), frameCount - 2);
+        sample.loopEnd = std::clamp<size_t>(entry.value("loopEndFrame", frameCount),
+                                             sample.loopStart + 2, frameCount);
+        bank->push_back(std::move(sample));
+    }
+    if (bank->empty()) { outError = "No se encontraron samples vocales compatibles"; return false; }
+    std::shared_ptr<const std::vector<MikuSample>> published = bank;
+    std::atomic_store_explicit(&mMikuSamples, published, std::memory_order_release);
+    LOGI("MIKU: banco cargado (%zu samples)", bank->size());
+    return true;
+}
+
 bool AudioEngine::loadIr(const std::string &wavPath, std::string &outError) {
     std::ifstream file(wavPath, std::ios::binary);
     if (!file) { outError = "No se pudo abrir el IR"; return false; }
@@ -465,6 +573,7 @@ void AudioEngine::processIrPartition() {
 }
 
 bool AudioEngine::start() {
+    std::lock_guard<std::recursive_mutex> streamLock(mStreamMutex);
     // Siempre partir de un estado limpio. Esto hace que los cambios de I/O
     // sean idempotentes aunque una apertura anterior haya fallado a medias.
     stop();
@@ -538,6 +647,7 @@ bool AudioEngine::start() {
         mBufferSizeFrames.store(mOutStream->getBufferSizeInFrames());
         auto xruns = mOutStream->getXRunCount();
         mXRunCount.store(xruns ? xruns.value() : 0);
+        mOutputXRunCount.store(xruns ? xruns.value() : 0);
         return true;
     };
 
@@ -564,6 +674,11 @@ bool AudioEngine::start() {
         stop();
         return false;
     }
+    mNamProcessingActive.store(false, std::memory_order_release);
+    mNamPeakLoadPercent.store(0.0, std::memory_order_relaxed);
+    mNamBufferPrimed = false;
+    const auto outputXruns = mOutStream->getXRunCount();
+    mLastOutputXruns = outputXruns ? outputXruns.value() : 0;
 
     LOGI("Routing IN id=%d -> OUT id=%d | salida: %d Hz, %d canal(es) | entrada: %d Hz, %d canal(es)",
          mInputDeviceId.load(), mOutputDeviceId.load(),
@@ -721,6 +836,8 @@ bool AudioEngine::start() {
 }
 
 void AudioEngine::stop() {
+    std::lock_guard<std::recursive_mutex> streamLock(mStreamMutex);
+    mNamProcessingActive.store(false, std::memory_order_release);
     if (mOutStream) {
         mOutStream->requestStop();
         mOutStream->close();
@@ -802,6 +919,7 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *stream,
         ? std::chrono::steady_clock::now()
         : std::chrono::steady_clock::time_point{};
     auto *output = static_cast<float *>(audioData);
+    mNamProcessingActive.store(false, std::memory_order_relaxed);
 
     // Nunca alocar en el callback de audio: si por lo que sea nos piden mas
     // frames que los reservados en start(), recortamos en vez de hacer
@@ -897,7 +1015,8 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *stream,
         mSmoothedInputGain += (inputTarget - mSmoothedInputGain) * smoothing;
         mMonoResult[i] = mInputBuffer[i] * mSmoothedInputGain;
         inputSquares += mMonoResult[i] * mMonoResult[i];
-        if (mTunerEnabled.load(std::memory_order_relaxed)) {
+        if (mTunerEnabled.load(std::memory_order_relaxed) ||
+            mMikuEnabled.load(std::memory_order_relaxed)) {
             if (mTunerWriteBuffer < 0) {
                 for (int slot = 0; slot < 2; ++slot) {
                     int expected = 0;
@@ -923,6 +1042,8 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *stream,
 
     const int configuredSlots = mEffectSlotCount.load(std::memory_order_acquire);
     const int slotsToProcess = configuredSlots > 0 ? configuredSlots : mEffectCount.load();
+    const auto mikuSamples = std::atomic_load_explicit(&mMikuSamples,
+                                                       std::memory_order_acquire);
     for (int slotIndex = 0; slotIndex < slotsToProcess; ++slotIndex) {
         EffectSlot *instance = configuredSlots > 0 ? &mEffectSlots[slotIndex] : nullptr;
         const int effect = instance ? instance->type.load() : mEffectOrder[slotIndex].load();
@@ -1004,6 +1125,11 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *stream,
         float &pitchMixSmoothed = instance ? instance->pitchMixSmoothed : mPitchMixSmoothed;
         float &pitchLevelSmoothed = instance ? instance->pitchLevelSmoothed : mPitchLevelSmoothed;
         float &pitchWetGain = instance ? instance->pitchWetGain : mPitchWetGain;
+        size_t &mikuSampleIndex = instance ? instance->mikuSampleIndex : mMikuSampleIndex;
+        double &mikuReadPosition = instance ? instance->mikuReadPosition : mMikuReadPosition;
+        float &mikuRatioSmoothed = instance ? instance->mikuRatioSmoothed : mMikuRatioSmoothed;
+        float &mikuVoiceGain = instance ? instance->mikuVoiceGain : mMikuVoiceGain;
+        int &mikuMidiNote = instance ? instance->mikuMidiNote : mMikuMidiNote;
 
         if (effect == 1) {
             const float threshold = dbToLinear(parameter(0));
@@ -1090,9 +1216,23 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *stream,
             {
                 std::unique_lock<std::mutex> lock(mModelMutex, std::try_to_lock);
                 if (lock.owns_lock() && mModel) {
+                    mNamProcessingActive.store(true, std::memory_order_release);
+                    const auto namStarted = sampleTelemetry
+                        ? std::chrono::steady_clock::now()
+                        : std::chrono::steady_clock::time_point{};
                     NAM_SAMPLE *inPtr = mDspInPtrStorage.data();
                     NAM_SAMPLE *outPtr = mDspOutPtrStorage.data();
                     mModel->process(&inPtr, &outPtr, frames);
+                    if (sampleTelemetry) {
+                        const double elapsed = std::chrono::duration<double>(
+                            std::chrono::steady_clock::now() - namStarted).count();
+                        const double budget = static_cast<double>(std::max(frames, 1)) /
+                            std::max(mSampleRate.load(), 1);
+                        const double load = std::clamp(elapsed / budget * 100.0, 0.0, 999.0);
+                        const double peak = mNamPeakLoadPercent.load(std::memory_order_relaxed);
+                        mNamPeakLoadPercent.store(std::max(load, peak * 0.995),
+                                                  std::memory_order_relaxed);
+                    }
                     for (int32_t i = 0; i < frames; ++i) mMonoResult[i] = mDspOutPtrStorage[i];
                 }
             }
@@ -1529,6 +1669,82 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *stream,
                     std::max(pitchWindowSmoothed, 128.0f);
                 pitchPhase -= std::floor(pitchPhase);
             }
+        } else if (effect == 15 && mikuSamples && !mikuSamples->empty()) {
+            // Síntesis vocal monofónica: el detector del afinador ya trabaja en
+            // un hilo auxiliar. Aquí solo se consulta su frecuencia atómica y
+            // se reproduce una muestra precargada, sin I/O ni allocations.
+            const float outputRate = static_cast<float>(std::max(mSampleRate.load(), 1));
+            const float mix = std::clamp(parameter(0) / 100.0f, 0.0f, 1.0f);
+            const float sensitivity = dbToLinear(std::clamp(parameter(1), -60.0f, 0.0f));
+            const float attackMs = std::clamp(parameter(2), 3.0f, 80.0f);
+            const float releaseMs = std::clamp(parameter(3), 30.0f, 500.0f);
+            const float level = dbToLinear(std::clamp(parameter(4), -18.0f, 12.0f));
+            const float attackCoeff = 1.0f - std::exp(-1.0f /
+                (0.001f * attackMs * outputRate));
+            const float releaseCoeff = 1.0f - std::exp(-1.0f /
+                (0.001f * releaseMs * outputRate));
+            const float controlCoeff = 1.0f - std::exp(-1.0f /
+                (0.012f * outputRate));
+            for (int32_t i = 0; i < frames; ++i) {
+                const float dry = mMonoResult[i];
+                const float detectedHz = mDetectedFrequency.load(std::memory_order_relaxed);
+                const bool active = detectedHz >= 55.0f && detectedHz <= 1400.0f &&
+                    std::abs(dry) >= sensitivity * 0.006f;
+                float targetGain = active ? 1.0f : 0.0f;
+                const int detectedMidi = active ? static_cast<int>(std::lround(
+                    69.0f + 12.0f * std::log2(detectedHz / 440.0f))) : -999;
+                if (active && detectedMidi != mikuMidiNote) {
+                    size_t closest = 0;
+                    float bestDistance = std::numeric_limits<float>::max();
+                    for (size_t index = 0; index < mikuSamples->size(); ++index) {
+                        const float sampleMidi = 69.0f + 12.0f *
+                            std::log2((*mikuSamples)[index].baseHz / 440.0f);
+                        const float distance = std::abs(sampleMidi - detectedMidi);
+                        if (distance < bestDistance) { bestDistance = distance; closest = index; }
+                    }
+                    mikuSampleIndex = closest;
+                    mikuReadPosition = static_cast<double>((*mikuSamples)[closest].loopStart);
+                    mikuRatioSmoothed = 1.0f;
+                    mikuMidiNote = detectedMidi;
+                } else if (!active) {
+                    mikuMidiNote = -999;
+                }
+                const auto &sample = (*mikuSamples)[std::min(mikuSampleIndex, mikuSamples->size() - 1)];
+                const float targetRatio = active
+                    ? (detectedHz / std::max(sample.baseHz, 1.0f)) *
+                        (static_cast<float>(sample.sampleRate) / outputRate)
+                    : 1.0f;
+                mikuRatioSmoothed += (targetRatio - mikuRatioSmoothed) * controlCoeff;
+                const float coeff = targetGain > mikuVoiceGain ? attackCoeff : releaseCoeff;
+                mikuVoiceGain += (targetGain - mikuVoiceGain) * coeff;
+                float vocal = 0.0f;
+                if (mikuVoiceGain > 1e-4f && sample.loopEnd > sample.loopStart + 2) {
+                    const size_t loopLength = sample.loopEnd - sample.loopStart;
+                    double position = mikuReadPosition;
+                    if (position >= static_cast<double>(sample.loopEnd)) {
+                        position = sample.loopStart + std::fmod(
+                            position - sample.loopStart, static_cast<double>(loopLength));
+                        mikuReadPosition = position;
+                    }
+                    const size_t index = std::min<size_t>(static_cast<size_t>(position), sample.samples.size() - 2);
+                    const float fraction = static_cast<float>(position - index);
+                    vocal = sample.samples[index] +
+                        (sample.samples[index + 1] - sample.samples[index]) * fraction;
+                    // Suaviza la unión del loop con una pequeña mezcla de sus
+                    // primeros frames, evitando clicks sin gastar CPU en FFT.
+                    constexpr size_t kLoopCrossfade = 128;
+                    if (position >= static_cast<double>(sample.loopEnd - kLoopCrossfade)) {
+                        const float t = static_cast<float>(sample.loopEnd - position) /
+                            static_cast<float>(kLoopCrossfade);
+                        const size_t head = sample.loopStart + static_cast<size_t>(
+                            (kLoopCrossfade - std::clamp(t, 0.0f, 1.0f) * kLoopCrossfade));
+                        if (head + 1 < sample.samples.size()) vocal = vocal * t + sample.samples[head] * (1.0f - t);
+                    }
+                    mikuReadPosition += std::max(0.1, static_cast<double>(mikuRatioSmoothed));
+                }
+                mMonoResult[i] = dry * (1.0f - mix * mikuVoiceGain) +
+                    vocal * mix * mikuVoiceGain * level;
+            }
         }
     }
     for (int32_t i = 0; i < frames; ++i) {
@@ -1681,6 +1897,7 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *stream,
         if (mOutStream) {
             auto xruns = mOutStream->getXRunCount();
             if (xruns) {
+                mOutputXRunCount.store(xruns.value(), std::memory_order_relaxed);
                 mXRunCount.store(
                     xruns.value() + static_cast<int32_t>(
                         mInputUnderflowCount.load(std::memory_order_relaxed)));

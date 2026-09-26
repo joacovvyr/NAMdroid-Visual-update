@@ -77,6 +77,7 @@ private fun styleFor(type: BlockType) = when (type) {
     BlockType.AUTO_WAH -> DroidStyle("AUTO-WAH-DROID", Color(0xFFFFD85A))
     BlockType.TREMOLO -> DroidStyle("TREMOLO-DROID", Color(0xFFFF6C78))
     BlockType.DETUNE -> DroidStyle("DETUNE-DROID", Color(0xFF65B7FF))
+    BlockType.MIKU -> DroidStyle("MIKU-DROID", Color(0xFF55DDE0))
     else -> DroidStyle(type.shortLabel + "-DROID", Color.White)
 }
 
@@ -88,6 +89,7 @@ private fun chassisFor(type: BlockType) = when (type) {
     BlockType.AUTO_WAH -> R.drawable.droid_chassis_auto_wah
     BlockType.TREMOLO -> R.drawable.droid_chassis_tremolo
     BlockType.DETUNE -> R.drawable.droid_chassis_detune
+    BlockType.MIKU -> R.drawable.droid_chassis_detune
     else -> R.drawable.droid_chassis_gate
 }
 

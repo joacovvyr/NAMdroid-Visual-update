@@ -34,6 +34,8 @@ class NamEngine {
     fun setEffectChain(types: IntArray, enabled: BooleanArray, params: FloatArray) =
         nativeSetEffectChain(types, enabled, params)
     fun loadIr(absolutePath: String): String = nativeLoadIr(absolutePath)
+    fun loadMikuSamples(directory: String, manifestPath: String): String =
+        nativeLoadMikuSamples(directory, manifestPath)
     fun setTunerEnabled(enabled: Boolean) = nativeSetTunerEnabled(enabled)
     fun getInputLevelDb(): Float = nativeGetInputLevelDb()
     fun getOutputLevelDb(): Float = nativeGetOutputLevelDb()
@@ -57,7 +59,10 @@ class NamEngine {
     fun getActualSharingMode(): Int = nativeGetActualSharingMode()
     fun getBufferSizeFrames(): Int = nativeGetBufferSizeFrames()
     fun getXRunCount(): Int = nativeGetXRunCount()
+    fun getOutputXRunCount(): Int = nativeGetOutputXRunCount()
+    fun getInputUnderflowCount(): Int = nativeGetInputUnderflowCount()
     fun getCallbackLoadPercent(): Double = nativeGetCallbackLoadPercent()
+    fun getNamPeakLoadPercent(): Double = nativeGetNamPeakLoadPercent()
     fun startStudioRecording(path: String): Boolean = nativeStartStudioRecording(path)
     fun stopStudioRecording() = nativeStopStudioRecording()
     fun loadStudioTrack(slot: Int, path: String): String = nativeLoadStudioTrack(slot, path)
@@ -83,6 +88,7 @@ class NamEngine {
     private external fun nativeBeginTransition()
     private external fun nativeSetEffectChain(types: IntArray, enabled: BooleanArray, params: FloatArray)
     private external fun nativeLoadIr(path: String): String
+    private external fun nativeLoadMikuSamples(directory: String, manifestPath: String): String
     private external fun nativeSetTunerEnabled(enabled: Boolean)
     private external fun nativeGetInputLevelDb(): Float
     private external fun nativeGetOutputLevelDb(): Float
@@ -100,7 +106,10 @@ class NamEngine {
     private external fun nativeGetActualSharingMode(): Int
     private external fun nativeGetBufferSizeFrames(): Int
     private external fun nativeGetXRunCount(): Int
+    private external fun nativeGetOutputXRunCount(): Int
+    private external fun nativeGetInputUnderflowCount(): Int
     private external fun nativeGetCallbackLoadPercent(): Double
+    private external fun nativeGetNamPeakLoadPercent(): Double
     private external fun nativeStartStudioRecording(path: String): Boolean
     private external fun nativeStopStudioRecording()
     private external fun nativeLoadStudioTrack(slot: Int, path: String): String

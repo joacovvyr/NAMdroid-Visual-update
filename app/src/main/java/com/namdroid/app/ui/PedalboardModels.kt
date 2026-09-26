@@ -103,6 +103,12 @@ enum class BlockType(val label: String, val shortLabel: String, val category: St
         ParameterSpec("window", "Tracking / Window", 18f..90f, 52f, "ms", 2),
         ParameterSpec("tone", "Tone", 0f..100f, 78f, "%", 3),
         ParameterSpec("level", "Level", -12f..12f, 0f, "dB", 4))),
+    MIKU("Vocal Synth", "MIKU", "Special", Color(0xFF55DDE0), 15, listOf(
+        ParameterSpec("mix", "Voice Mix", 0f..100f, 100f, "%", 0),
+        ParameterSpec("sensitivity", "Tracking", -60f..0f, -36f, "dB", 1),
+        ParameterSpec("attack", "Attack", 3f..80f, 12f, "ms", 2),
+        ParameterSpec("release", "Release", 30f..500f, 180f, "ms", 3),
+        ParameterSpec("level", "Level", -18f..12f, 0f, "dB", 4))),
     DELAY("Layer Delay", "DLY", "Delay", Color(0xFF40C9C6), 5, listOf(
         ParameterSpec("time", "Quarter Time", 40f..1500f, 360f, "ms", 0),
         ParameterSpec("feedback", "Feedback", 0f..96f, 38f, "%", 1),
@@ -143,8 +149,11 @@ private fun PedalBlock.toJson() = JSONObject().apply {
 }
 
 fun rigFromJson(json: JSONObject): RigPreset {
-    val blocks = json.getJSONArray("blocks").let { array -> (0 until array.length()).map { index ->
-        val item = array.getJSONObject(index); val type = BlockType.valueOf(item.getString("type")); val values = item.optJSONObject("parameters")
+    val blocks = json.getJSONArray("blocks").let { array -> (0 until array.length()).mapNotNull { index ->
+        val item = array.getJSONObject(index)
+        val type = runCatching { BlockType.valueOf(item.getString("type")) }.getOrNull()
+            ?: return@mapNotNull null
+        val values = item.optJSONObject("parameters")
         val params = type.parameters.associate { spec ->
             val value = values?.optDouble(spec.key, spec.default.toDouble())?.toFloat() ?: spec.default
             spec.key to (if (value.isFinite()) value.coerceIn(spec.range) else spec.default)

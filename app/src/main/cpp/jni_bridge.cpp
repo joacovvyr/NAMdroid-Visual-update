@@ -109,6 +109,20 @@ Java_com_namdroid_app_audio_NamEngine_nativeLoadIr(JNIEnv *env, jobject, jstring
     return env->NewStringUTF(ok ? "" : error.c_str());
 }
 
+JNIEXPORT jstring JNICALL
+Java_com_namdroid_app_audio_NamEngine_nativeLoadMikuSamples(
+        JNIEnv *env, jobject, jstring directory, jstring manifestPath) {
+    if (!gEngine) gEngine = std::make_unique<AudioEngine>();
+    if (!directory || !manifestPath) return env->NewStringUTF("Rutas vocales ausentes");
+    const char *dirChars = env->GetStringUTFChars(directory, nullptr);
+    const char *manifestChars = env->GetStringUTFChars(manifestPath, nullptr);
+    std::string error;
+    const bool ok = gEngine->loadMikuSamples(dirChars, manifestChars, error);
+    env->ReleaseStringUTFChars(directory, dirChars);
+    env->ReleaseStringUTFChars(manifestPath, manifestChars);
+    return env->NewStringUTF(ok ? "" : error.c_str());
+}
+
 JNIEXPORT void JNICALL
 Java_com_namdroid_app_audio_NamEngine_nativeSetTunerEnabled(JNIEnv *, jobject, jboolean enabled) {
     if (gEngine) gEngine->setTunerEnabled(enabled);
@@ -177,7 +191,10 @@ JNIEXPORT jint JNICALL Java_com_namdroid_app_audio_NamEngine_nativeGetOutputChan
 JNIEXPORT jint JNICALL Java_com_namdroid_app_audio_NamEngine_nativeGetActualSharingMode(JNIEnv *, jobject) { return gEngine ? gEngine->getActualSharingMode() : 0; }
 JNIEXPORT jint JNICALL Java_com_namdroid_app_audio_NamEngine_nativeGetBufferSizeFrames(JNIEnv *, jobject) { return gEngine ? gEngine->getBufferSizeFrames() : 0; }
 JNIEXPORT jint JNICALL Java_com_namdroid_app_audio_NamEngine_nativeGetXRunCount(JNIEnv *, jobject) { return gEngine ? gEngine->getXRunCount() : 0; }
+JNIEXPORT jint JNICALL Java_com_namdroid_app_audio_NamEngine_nativeGetOutputXRunCount(JNIEnv *, jobject) { return gEngine ? gEngine->getOutputXRunCount() : 0; }
+JNIEXPORT jint JNICALL Java_com_namdroid_app_audio_NamEngine_nativeGetInputUnderflowCount(JNIEnv *, jobject) { return gEngine ? static_cast<jint>(gEngine->getInputUnderflowCount()) : 0; }
 JNIEXPORT jdouble JNICALL Java_com_namdroid_app_audio_NamEngine_nativeGetCallbackLoadPercent(JNIEnv *, jobject) { return gEngine ? gEngine->getLastCallbackLoadPercent() : 0.0; }
+JNIEXPORT jdouble JNICALL Java_com_namdroid_app_audio_NamEngine_nativeGetNamPeakLoadPercent(JNIEnv *, jobject) { return gEngine ? gEngine->getNamPeakLoadPercent() : 0.0; }
 
 JNIEXPORT jboolean JNICALL
 Java_com_namdroid_app_audio_NamEngine_nativeStartStudioRecording(JNIEnv *env, jobject, jstring path) {
