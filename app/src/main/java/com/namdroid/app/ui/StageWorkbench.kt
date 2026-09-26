@@ -132,6 +132,7 @@ fun StageWorkbench(
         BlockType.AUTO_WAH,
         BlockType.TREMOLO,
         BlockType.DETUNE,
+        BlockType.MIKU,
     )
     if (editing && selected != null && selected.type in standardDroidTypes) {
         BackHandler(foreground) { onCloseEditor() }
@@ -606,6 +607,7 @@ private fun ChainRowsButton(label: String, selected: Boolean, click: () -> Unit)
         BlockType.AUTO_WAH -> R.drawable.droid_chassis_auto_wah
         BlockType.TREMOLO -> R.drawable.droid_chassis_tremolo
         BlockType.DETUNE -> R.drawable.droid_chassis_detune
+        BlockType.MIKU -> R.drawable.droid_chassis_detune
         else -> null
     }
     val legacyResource = when (block.type) {
@@ -959,6 +961,7 @@ private fun droidChainTitle(type: BlockType) = when (type) {
     BlockType.AUTO_WAH -> "AUTO-WAH-DROID"
     BlockType.TREMOLO -> "TREMOLO-DROID"
     BlockType.DETUNE -> "DETUNE-DROID"
+    BlockType.MIKU -> "MIKU-DROID"
     BlockType.AMP -> "AMP-DROID"
     BlockType.IR -> "CAB-DROID"
     else -> type.shortLabel

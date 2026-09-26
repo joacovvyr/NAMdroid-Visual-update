@@ -34,6 +34,8 @@ class NamEngine {
     fun setEffectChain(types: IntArray, enabled: BooleanArray, params: FloatArray) =
         nativeSetEffectChain(types, enabled, params)
     fun loadIr(absolutePath: String): String = nativeLoadIr(absolutePath)
+    fun loadMikuSamples(directory: String, manifestPath: String): String =
+        nativeLoadMikuSamples(directory, manifestPath)
     fun setTunerEnabled(enabled: Boolean) = nativeSetTunerEnabled(enabled)
     fun getInputLevelDb(): Float = nativeGetInputLevelDb()
     fun getOutputLevelDb(): Float = nativeGetOutputLevelDb()
@@ -86,6 +88,7 @@ class NamEngine {
     private external fun nativeBeginTransition()
     private external fun nativeSetEffectChain(types: IntArray, enabled: BooleanArray, params: FloatArray)
     private external fun nativeLoadIr(path: String): String
+    private external fun nativeLoadMikuSamples(directory: String, manifestPath: String): String
     private external fun nativeSetTunerEnabled(enabled: Boolean)
     private external fun nativeGetInputLevelDb(): Float
     private external fun nativeGetOutputLevelDb(): Float

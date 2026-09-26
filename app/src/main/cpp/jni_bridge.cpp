@@ -109,6 +109,20 @@ Java_com_namdroid_app_audio_NamEngine_nativeLoadIr(JNIEnv *env, jobject, jstring
     return env->NewStringUTF(ok ? "" : error.c_str());
 }
 
+JNIEXPORT jstring JNICALL
+Java_com_namdroid_app_audio_NamEngine_nativeLoadMikuSamples(
+        JNIEnv *env, jobject, jstring directory, jstring manifestPath) {
+    if (!gEngine) gEngine = std::make_unique<AudioEngine>();
+    if (!directory || !manifestPath) return env->NewStringUTF("Rutas vocales ausentes");
+    const char *dirChars = env->GetStringUTFChars(directory, nullptr);
+    const char *manifestChars = env->GetStringUTFChars(manifestPath, nullptr);
+    std::string error;
+    const bool ok = gEngine->loadMikuSamples(dirChars, manifestChars, error);
+    env->ReleaseStringUTFChars(directory, dirChars);
+    env->ReleaseStringUTFChars(manifestPath, manifestChars);
+    return env->NewStringUTF(ok ? "" : error.c_str());
+}
+
 JNIEXPORT void JNICALL
 Java_com_namdroid_app_audio_NamEngine_nativeSetTunerEnabled(JNIEnv *, jobject, jboolean enabled) {
     if (gEngine) gEngine->setTunerEnabled(enabled);
