@@ -57,6 +57,8 @@ class NamEngine {
     fun getActualSharingMode(): Int = nativeGetActualSharingMode()
     fun getBufferSizeFrames(): Int = nativeGetBufferSizeFrames()
     fun getXRunCount(): Int = nativeGetXRunCount()
+    fun getOutputXRunCount(): Int = nativeGetOutputXRunCount()
+    fun getInputUnderflowCount(): Int = nativeGetInputUnderflowCount()
     fun getCallbackLoadPercent(): Double = nativeGetCallbackLoadPercent()
     fun getNamPeakLoadPercent(): Double = nativeGetNamPeakLoadPercent()
     fun startStudioRecording(path: String): Boolean = nativeStartStudioRecording(path)
@@ -101,6 +103,8 @@ class NamEngine {
     private external fun nativeGetActualSharingMode(): Int
     private external fun nativeGetBufferSizeFrames(): Int
     private external fun nativeGetXRunCount(): Int
+    private external fun nativeGetOutputXRunCount(): Int
+    private external fun nativeGetInputUnderflowCount(): Int
     private external fun nativeGetCallbackLoadPercent(): Double
     private external fun nativeGetNamPeakLoadPercent(): Double
     private external fun nativeStartStudioRecording(path: String): Boolean
